@@ -4,11 +4,12 @@ import PanelLateralIzquierdo from './PanelLateralIzquierdo';
 import PanelLateralDerecho from './PanelLateralDerecho';
 import ModalAnimacion from './ModalAnimacion';
 import PanelRespuesta from './PanelRespuesta';
-import ModalAdvertencia from './ModalAdvertencia'; // Nuevo componente para mostrar inconsistencias
+import GestionInconsistencias from './GestionInconsistencias'; // Componente mejorado
+import ModeloMentalVisualizador from './ModeloMentalVisualizador'; // Nuevo componente
 import { obtenerClasesTema } from '../utils/temas';
 import { analizarTableroCompleto, seleccionarSiguienteCelda } from '../utils/logicaJuego';
 import { verificarConsistenciaRespuesta } from '../utils/validacionLogica';
-import { TAMAÑOS_TABLERO } from '../constants/gameConfig';
+import { TAMAÑOS_TABLERO, MODOS_VALIDACION, DURACION_ANIMACION, DURACION_MODAL } from '../constants/gameConfig';
 
 const Buscaminas = () => {
     // Estado del juego
@@ -34,9 +35,18 @@ const Buscaminas = () => {
     
     // Estados para la validación de inconsistencias
     const [mostrarAdvertencia, setMostrarAdvertencia] = useState(false);
-    const [mensajeAdvertencia, setMensajeAdvertencia] = useState('');
     const [inconsistenciaDetectada, setInconsistenciaDetectada] = useState(null);
-    const [modoValidacion, setModoValidacion] = useState('advertir'); // 'advertir', 'impedir', 'ignorar'
+    const [modoValidacion, setModoValidacion] = useState(MODOS_VALIDACION.ADVERTIR);
+    
+    // Estado para las estadísticas de juego
+    const [estadisticas, setEstadisticas] = useState({
+        movimientos: 0,
+        banderasColocadas: 0,
+        celdasSeguras: 0,
+        tiempoTotal: 0,
+        partidasJugadas: 0,
+        victorias: 0
+    });
     
     // Refs para manejar el estado en setTimeout
     const stateRef = useRef({});
@@ -67,7 +77,7 @@ const Buscaminas = () => {
             }, 1000);
             setIntervaloTiempo(intervalo);
 
-            // Configurar análisis periódico cada 3 segundos
+            // Configurar análisis periódico
             const busquedaIntervalo = setInterval(() => {
                 if (!stateRef.current.esperandoRespuesta && !stateRef.current.juegoTerminado) {
                     analizarTableroCompleto({
@@ -112,7 +122,7 @@ const Buscaminas = () => {
         if (animacion) {
             const timeout = setTimeout(() => {
                 setAnimacion(null);
-            }, 1500);
+            }, DURACION_ANIMACION);
 
             return () => clearTimeout(timeout);
         }
@@ -123,7 +133,7 @@ const Buscaminas = () => {
         if (mostrarModal) {
             const timeout = setTimeout(() => {
                 setMostrarModal(false);
-            }, 3000);
+            }, DURACION_MODAL);
 
             return () => clearTimeout(timeout);
         }
@@ -147,7 +157,6 @@ const Buscaminas = () => {
         setAnimacion(null);
         setMostrarModal(false);
         setMostrarAdvertencia(false);
-        setMensajeAdvertencia('');
         setInconsistenciaDetectada(null);
 
         if (intervaloTiempo) {
@@ -158,6 +167,15 @@ const Buscaminas = () => {
         if (intervaloBusqueda) {
             clearInterval(intervaloBusqueda);
             setIntervaloBusqueda(null);
+        }
+        
+        // Actualizar estadísticas si era un juego en curso
+        if (juegoIniciado) {
+            setEstadisticas(prev => ({
+                ...prev,
+                partidasJugadas: prev.partidasJugadas + 1,
+                tiempoTotal: prev.tiempoTotal + tiempoJuego
+            }));
         }
     };
 
@@ -172,6 +190,14 @@ const Buscaminas = () => {
         seleccionarCelda(filaRandom, columnaRandom);
         setMensajeSistema(`El sistema ha seleccionado la casilla (${filaRandom + 1},${columnaRandom + 1}). ¿Qué hay en esta casilla?`);
         setAnimacion('iniciar');
+        
+        // Inicializar estadísticas para la partida actual
+        setEstadisticas(prev => ({
+            ...prev,
+            movimientos: 0,
+            banderasColocadas: 0,
+            celdasSeguras: 0
+        }));
     };
 
     // Wrapper para seleccionarSiguienteCelda que incluye los estados actuales
@@ -231,6 +257,12 @@ const Buscaminas = () => {
         setCeldaActual({ fila, columna });
         setEsperandoRespuesta(true);
         setAnimacion('seleccionar');
+        
+        // Actualizar estadísticas
+        setEstadisticas(prev => ({
+            ...prev,
+            movimientos: prev.movimientos + 1
+        }));
     };
 
     // Cambiar el modo de validación
@@ -240,7 +272,7 @@ const Buscaminas = () => {
         
         // Si cambiamos a 'ignorar' y estamos esperando una respuesta con una inconsistencia,
         // aplicamos la respuesta automáticamente
-        if (modo === 'ignorar' && inconsistenciaDetectada && esperandoRespuesta) {
+        if (modo === MODOS_VALIDACION.IGNORAR && inconsistenciaDetectada && esperandoRespuesta) {
             aplicarRespuestaConInconsistencia();
         }
     };
@@ -248,6 +280,16 @@ const Buscaminas = () => {
     // Aplicar una respuesta a pesar de la inconsistencia
     const aplicarRespuestaConInconsistencia = () => {
         if (!inconsistenciaDetectada || !celdaActual) return;
+        
+        // Verificar si es una inconsistencia crítica que no se puede ignorar
+        if (inconsistenciaDetectada.contradicciones && 
+            inconsistenciaDetectada.contradicciones.length > 0 &&
+            (inconsistenciaDetectada.contradicciones[0].tipo === 'exceso_minas' || 
+             inconsistenciaDetectada.contradicciones[0].tipo === 'exceso_banderas')) {
+            // No permitir continuar con errores críticos
+            setMostrarAdvertencia(false);
+            return;
+        }
         
         // Continuar con la respuesta a pesar de la inconsistencia
         const { fila, columna } = celdaActual;
@@ -303,135 +345,146 @@ const Buscaminas = () => {
     };
 
     // Respuesta del usuario sobre el contenido de la celda
-    // Respuesta del usuario sobre el contenido de la celda
-const responderContenidoCelda = (tipo) => {
-    console.log("Respondiendo contenido de celda:", tipo);
-    
-    if (!celdaActual || !esperandoRespuesta) {
-        console.log("No se puede responder: no hay celda actual o no esperando respuesta");
-        return;
-    }
-
-    const { fila, columna } = celdaActual;
-    setTipoRespuesta(tipo);
-
-    // Verificar la consistencia lógica de la respuesta - Con validación exhaustiva
-    const resultadoValidacion = verificarConsistenciaRespuesta(
-        fila,
-        columna,
-        tipo,
-        tablero,
-        celdasDescubiertas,
-        banderas,
-        tamañoSeleccionado
-    );
-
-    // Si detectamos una inconsistencia
-    if (!resultadoValidacion.esConsistente) {
-        console.log("Inconsistencia detectada:", resultadoValidacion.mensaje);
-        setInconsistenciaDetectada(resultadoValidacion);
+    const responderContenidoCelda = (tipo) => {
+        console.log("Respondiendo contenido de celda:", tipo);
         
-        // Realizar verificación especial para exceso de banderas cerca de un número
-        const hayExcesoBanderas = resultadoValidacion.contradicciones.some(
-            c => c.tipo === 'exceso_minas' || c.tipo === 'exceso_banderas'
-        );
-        
-        // Según el modo de validación
-        if (modoValidacion === 'advertir') {
-            setMostrarAdvertencia(true);
-            setMensajeAdvertencia(resultadoValidacion.mensaje + 
-                (hayExcesoBanderas ? " Este es un error común que viola las reglas básicas del Buscaminas." : ""));
-            return; // Esperar a que el usuario decida
-        } else if (modoValidacion === 'impedir') {
-            // Mostrar advertencia pero no permitir continuar
-            setMostrarAdvertencia(true);
-            setMensajeAdvertencia(resultadoValidacion.mensaje + 
-                (hayExcesoBanderas ? " Este es un error que viola las reglas básicas del Buscaminas y no se permite." : "") + 
-                " Por favor, proporciona una respuesta lógicamente consistente.");
-            return; // No permitir continuar
+        if (!celdaActual || !esperandoRespuesta) {
+            console.log("No se puede responder: no hay celda actual o no esperando respuesta");
+            return;
         }
-        // Si el modo es 'ignorar', continuamos normalmente
-    }
 
-    // Actualizar el tablero con la respuesta del usuario
-    const nuevoTablero = [...tablero];
+        const { fila, columna } = celdaActual;
+        setTipoRespuesta(tipo);
 
-    if (tipo === 'vacío') {
-        nuevoTablero[fila][columna] = '';
-    } else if (tipo === 'mina') {
-        nuevoTablero[fila][columna] = 'M';
-    } else {
-        nuevoTablero[fila][columna] = tipo;
-    }
+        // Verificar la consistencia lógica de la respuesta
+        const resultadoValidacion = verificarConsistenciaRespuesta(
+            fila,
+            columna,
+            tipo,
+            tablero,
+            celdasDescubiertas,
+            banderas,
+            tamañoSeleccionado
+        );
 
-    setTablero(nuevoTablero);
-
-    // Marcar la celda como descubierta
-    const nuevasCeldasDescubiertas = [...celdasDescubiertas, { fila, columna }];
-    setCeldasDescubiertas(nuevasCeldasDescubiertas);
-
-    // Añadir al historial
-    const nuevoHistorial = [...historialMovimientos, {
-        fila,
-        columna,
-        contenido: tipo,
-        inconsistente: !resultadoValidacion.esConsistente
-    }];
-    setHistorialMovimientos(nuevoHistorial);
-
-    // IMPORTANTE: Actualizar inmediatamente el stateRef para que tenga los valores actualizados
-    stateRef.current = {
-        ...stateRef.current,
-        tablero: nuevoTablero,
-        celdasDescubiertas: nuevasCeldasDescubiertas,
-        historialMovimientos: nuevoHistorial
-    };
-
-    // Verificar si el sistema ha perdido (encontró una mina)
-    if (tipo === 'mina') {
-        setJuegoTerminado(true);
-        stateRef.current.juegoTerminado = true;
-        setMensajeSistema("¡BOOM! El sistema encontró una mina.");
-        setAnimacion('explosion');
-        setMostrarModal(true);
-        setMensajeModal('¡PUM! Has ganado. El sistema encontró una mina. ¿Quieres intentar de nuevo?');
-        setTipoModal('error');
-        setEsperandoRespuesta(false);
-        stateRef.current.esperandoRespuesta = false;
-    } else {
-        // IMPORTANTE: Desactivar esperandoRespuesta ANTES de llamar a la siguiente selección
-        setEsperandoRespuesta(false);
-        stateRef.current.esperandoRespuesta = false;
-        
-        setAnimacion('respuesta');
-
-        // Analizar el tablero para buscar nuevos patrones
-        setTimeout(() => {
-            analizarTableroCompleto({
-                tablero: nuevoTablero, 
-                tamañoSeleccionado, 
-                celdasDescubiertas: nuevasCeldasDescubiertas,
-                banderas,
-                historialMovimientos: nuevoHistorial,
-                setBanderas,
-                setMensajeSistema,
-                setAnimacion,
-                setMostrarModal,
-                setMensajeModal,
-                setTipoModal,
-                setHistorialMovimientos,
-                seleccionarSiguienteCelda: () => seleccionarSiguienteCeldaWrapper()
-            });
-        }, 500);
-
-        // Seleccionar siguiente celda después de un breve retraso
-        setTimeout(() => {
-            if (!stateRef.current.esperandoRespuesta && !stateRef.current.juegoTerminado) {
-                seleccionarSiguienteCeldaWrapper();
+        // Si detectamos una inconsistencia
+        if (!resultadoValidacion.esConsistente) {
+            console.log("Inconsistencia detectada:", resultadoValidacion.mensaje);
+            setInconsistenciaDetectada(resultadoValidacion);
+            
+            // Determinar si es una inconsistencia crítica
+            const esInconsistenciaCritica = resultadoValidacion.contradicciones.some(
+                c => c.tipo === 'exceso_minas' || c.tipo === 'exceso_banderas'
+            );
+            
+            // Aplicar reglas según el modo de validación
+            if (modoValidacion === MODOS_VALIDACION.ADVERTIR) {
+                setMostrarAdvertencia(true);
+                return; // Esperar a que el usuario decida
+            } 
+            else if (modoValidacion === MODOS_VALIDACION.IMPEDIR || esInconsistenciaCritica) {
+                // Siempre impedimos contradicciones críticas, independientemente del modo
+                setMostrarAdvertencia(true);
+                return; // No permitir continuar
             }
-        }, 1000);
-    }
-};
+            // Si el modo es 'ignorar' y no es crítica, continuamos normalmente
+        }
+
+        // Actualizar el tablero con la respuesta del usuario
+        const nuevoTablero = [...tablero];
+
+        if (tipo === 'vacío') {
+            nuevoTablero[fila][columna] = '';
+        } else if (tipo === 'mina') {
+            nuevoTablero[fila][columna] = 'M';
+        } else {
+            nuevoTablero[fila][columna] = tipo;
+        }
+
+        setTablero(nuevoTablero);
+
+        // Marcar la celda como descubierta
+        const nuevasCeldasDescubiertas = [...celdasDescubiertas, { fila, columna }];
+        setCeldasDescubiertas(nuevasCeldasDescubiertas);
+
+        // Añadir al historial
+        const nuevoHistorial = [...historialMovimientos, {
+            fila,
+            columna,
+            contenido: tipo,
+            inconsistente: !resultadoValidacion.esConsistente
+        }];
+        setHistorialMovimientos(nuevoHistorial);
+
+        // Actualizar estadísticas
+        if (tipo === 'vacío' || !isNaN(tipo)) {
+            setEstadisticas(prev => ({
+                ...prev,
+                celdasSeguras: prev.celdasSeguras + 1
+            }));
+        }
+
+        // IMPORTANTE: Actualizar inmediatamente el stateRef para que tenga los valores actualizados
+        stateRef.current = {
+            ...stateRef.current,
+            tablero: nuevoTablero,
+            celdasDescubiertas: nuevasCeldasDescubiertas,
+            historialMovimientos: nuevoHistorial
+        };
+
+        // Verificar si el sistema ha perdido (encontró una mina)
+        if (tipo === 'mina') {
+            setJuegoTerminado(true);
+            stateRef.current.juegoTerminado = true;
+            setMensajeSistema("¡BOOM! El sistema encontró una mina.");
+            setAnimacion('explosion');
+            setMostrarModal(true);
+            setMensajeModal('¡PUM! Has ganado. El sistema encontró una mina. ¿Quieres intentar de nuevo?');
+            setTipoModal('error');
+            setEsperandoRespuesta(false);
+            stateRef.current.esperandoRespuesta = false;
+            
+            // Actualizar estadísticas
+            setEstadisticas(prev => ({
+                ...prev,
+                partidasJugadas: prev.partidasJugadas + 1,
+                victorias: prev.victorias + 1,
+                tiempoTotal: prev.tiempoTotal + tiempoJuego
+            }));
+        } else {
+            // IMPORTANTE: Desactivar esperandoRespuesta ANTES de llamar a la siguiente selección
+            setEsperandoRespuesta(false);
+            stateRef.current.esperandoRespuesta = false;
+            
+            setAnimacion('respuesta');
+
+            // Analizar el tablero para buscar nuevos patrones
+            setTimeout(() => {
+                analizarTableroCompleto({
+                    tablero: nuevoTablero, 
+                    tamañoSeleccionado, 
+                    celdasDescubiertas: nuevasCeldasDescubiertas,
+                    banderas,
+                    historialMovimientos: nuevoHistorial,
+                    setBanderas: (nuevasBanderas) => {
+                        setBanderas(nuevasBanderas);
+                        // Actualizar estadística de banderas colocadas
+                        setEstadisticas(prev => ({
+                            ...prev,
+                            banderasColocadas: nuevasBanderas.length
+                        }));
+                    },
+                    setMensajeSistema,
+                    setAnimacion,
+                    setMostrarModal,
+                    setMensajeModal,
+                    setTipoModal,
+                    setHistorialMovimientos,
+                    seleccionarSiguienteCelda: () => seleccionarSiguienteCeldaWrapper()
+                });
+            }, 500);
+        }
+    };
 
     // Cambiar el tema de color
     const cambiarTemaColor = (tema) => {
@@ -482,64 +535,18 @@ const responderContenidoCelda = (tipo) => {
                 inicializarTablero={inicializarTablero}
             />
 
-            {/* Modal de advertencia de inconsistencia */}
-            {mostrarAdvertencia && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className={`bg-white p-6 rounded-lg shadow-lg max-w-lg mx-auto text-center border-4 border-yellow-500`}>
-                        <h2 className="text-xl font-bold mb-4 text-yellow-600">¡Advertencia de Inconsistencia!</h2>
-                        <p className="mb-4">{mensajeAdvertencia}</p>
-                        <div className="grid grid-cols-2 gap-4">
-                            {modoValidacion === 'advertir' && (
-                                <>
-                                    <button 
-                                        className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-                                        onClick={() => setMostrarAdvertencia(false)}
-                                    >
-                                        Elegir otra respuesta
-                                    </button>
-                                    <button 
-                                        className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700"
-                                        onClick={aplicarRespuestaConInconsistencia}
-                                    >
-                                        Continuar de todos modos
-                                    </button>
-                                </>
-                            )}
-                            {modoValidacion === 'impedir' && (
-                                <button 
-                                    className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 col-span-2"
-                                    onClick={() => setMostrarAdvertencia(false)}
-                                >
-                                    Volver y elegir otra respuesta
-                                </button>
-                            )}
-                        </div>
-                        <div className="mt-4">
-                            <h3 className="font-semibold mb-2">Modo de validación:</h3>
-                            <div className="flex justify-center space-x-4">
-                                <button 
-                                    className={`px-3 py-1 rounded ${modoValidacion === 'advertir' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-                                    onClick={() => cambiarModoValidacion('advertir')}
-                                >
-                                    Advertir
-                                </button>
-                                <button 
-                                    className={`px-3 py-1 rounded ${modoValidacion === 'impedir' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-                                    onClick={() => cambiarModoValidacion('impedir')}
-                                >
-                                    Impedir
-                                </button>
-                                <button 
-                                    className={`px-3 py-1 rounded ${modoValidacion === 'ignorar' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-                                    onClick={() => cambiarModoValidacion('ignorar')}
-                                >
-                                    Ignorar
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* Componente mejorado de gestión de inconsistencias */}
+            <GestionInconsistencias
+                mostrarAdvertencia={mostrarAdvertencia}
+                inconsistenciaDetectada={inconsistenciaDetectada}
+                tablero={tablero}
+                celdasDescubiertas={celdasDescubiertas}
+                setMostrarAdvertencia={setMostrarAdvertencia}
+                aplicarRespuestaConInconsistencia={aplicarRespuestaConInconsistencia}
+                modoValidacion={modoValidacion}
+                cambiarModoValidacion={cambiarModoValidacion}
+                tema={tema}
+            />
 
             <div className="w-full max-w-full flex flex-col md:flex-row">
                 <PanelLateralIzquierdo 
@@ -560,15 +567,28 @@ const responderContenidoCelda = (tipo) => {
                     historialMovimientos={historialMovimientos}
                     modoValidacion={modoValidacion}
                     cambiarModoValidacion={cambiarModoValidacion}
+                    estadisticas={estadisticas}
                 />
 
                 <div className="w-full md:w-2/4 p-4 flex flex-col">
-                    {/* IMPORTANTE: Renderizar condicionalmente el panel de respuesta */}
+                    {/* Panel de respuesta */}
                     {esperandoRespuesta && !juegoTerminado && celdaActual && !mostrarAdvertencia && (
                         <PanelRespuesta 
                             celdaActual={celdaActual}
                             tipoRespuesta={tipoRespuesta}
                             responderContenidoCelda={responderContenidoCelda}
+                            tema={tema}
+                        />
+                    )}
+
+                    {/* Visualizador de modelo mental (solo visible durante el juego) */}
+                    {juegoIniciado && !juegoTerminado && (
+                        <ModeloMentalVisualizador
+                            tablero={tablero}
+                            tamañoSeleccionado={tamañoSeleccionado}
+                            celdasDescubiertas={celdasDescubiertas}
+                            banderas={banderas}
+                            celdaActual={celdaActual}
                             tema={tema}
                         />
                     )}
@@ -591,6 +611,8 @@ const responderContenidoCelda = (tipo) => {
                     mensajeSistema={mensajeSistema}
                     modoValidacion={modoValidacion}
                     cambiarModoValidacion={cambiarModoValidacion}
+                    juegoIniciado={juegoIniciado}
+                    estadisticas={estadisticas}
                 />
             </div>
         </div>
