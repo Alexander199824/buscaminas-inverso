@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { obtenerCeldasAdyacentes } from '../utils/logicaJuego';
 
 /**
  * Componente para visualizar el proceso de razonamiento del algoritmo de Buscaminas
@@ -19,38 +20,13 @@ const ModeloMentalVisualizador = ({
         return valor && !isNaN(valor);
     });
     
-    // Función para obtener todas las celdas adyacentes
-    const obtenerTodasCeldasAdyacentes = (fila, columna) => {
-        const filasTablero = tamañoSeleccionado.filas;
-        const columnasTablero = tamañoSeleccionado.columnas;
-        let celdasAdyacentes = [];
-
-        for (let i = -1; i <= 1; i++) {
-            for (let j = -1; j <= 1; j++) {
-                if (i === 0 && j === 0) continue;
-
-                const nuevaFila = fila + i;
-                const nuevaColumna = columna + j;
-
-                if (
-                    nuevaFila >= 0 && nuevaFila < filasTablero &&
-                    nuevaColumna >= 0 && nuevaColumna < columnasTablero
-                ) {
-                    celdasAdyacentes.push({ fila: nuevaFila, columna: nuevaColumna });
-                }
-            }
-        }
-
-        return celdasAdyacentes;
-    };
-    
     // Analizar cada celda numérica para mostrar su razonamiento
     const analisisCeldas = celdasNumericas.map(celda => {
         const { fila, columna } = celda;
         const valor = parseInt(tablero[fila][columna]);
         
         // Obtener celdas adyacentes
-        const celdasAdyacentes = obtenerTodasCeldasAdyacentes(fila, columna);
+        const celdasAdyacentes = obtenerCeldasAdyacentes(fila, columna, tamañoSeleccionado);
         
         // Contar banderas
         const celdasConBandera = celdasAdyacentes.filter(c => 
@@ -75,6 +51,10 @@ const ModeloMentalVisualizador = ({
                           (Math.abs(celdaActual.fila - fila) <= 1 && 
                            Math.abs(celdaActual.columna - columna) <= 1);
         
+        // Calcular probabilidad si no es segura ni tiene definitivamente minas
+        const probabilidad = !hayCeldasSeguras && !hayCeldasConMina && celdasSinDescubrir.length > 0 ? 
+            (valor - celdasConBandera.length) / celdasSinDescubrir.length : null;
+        
         return {
             celda: { fila, columna },
             valor,
@@ -83,6 +63,7 @@ const ModeloMentalVisualizador = ({
             celdasSinDescubrir,
             hayCeldasSeguras,
             hayCeldasConMina,
+            probabilidad,
             esRelevante
         };
     });
@@ -91,13 +72,14 @@ const ModeloMentalVisualizador = ({
     const analisisRelevantes = analisisCeldas.filter(analisis => 
         analisis.hayCeldasSeguras || 
         analisis.hayCeldasConMina || 
+        analisis.probabilidad !== null ||
         analisis.esRelevante
     );
     
     return (
         <div className={`p-4 border rounded ${tema.panel} shadow-sm mb-6`}>
             <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">Modelo Mental</h3>
+                <h3 className="text-lg font-semibold">Análisis del Sistema</h3>
                 <button 
                     className={`text-sm ${tema.botonSecundario} px-2 py-1 rounded`}
                     onClick={() => setMostrarAyuda(!mostrarAyuda)}
@@ -113,7 +95,8 @@ const ModeloMentalVisualizador = ({
                         <li>Para cada celda con número, el sistema analiza sus 8 celdas adyacentes</li>
                         <li><span className="text-green-600 font-medium">Celdas seguras:</span> Si el número coincide con las banderas ya colocadas, todas las demás celdas adyacentes son seguras</li>
                         <li><span className="text-red-600 font-medium">Celdas con mina:</span> Si el número de celdas sin descubrir es igual al número de minas que faltan por marcar, todas deben tener minas</li>
-                        <li>El sistema también utiliza técnicas avanzadas como análisis de intersecciones y patrones típicos de Buscaminas</li>
+                        <li><span className="text-orange-600 font-medium">Probabilidades:</span> Si no hay certeza, el sistema calcula la probabilidad de mina para cada celda</li>
+                        <li>El sistema también utiliza técnicas avanzadas como análisis de intersecciones entre celdas</li>
                     </ul>
                 </div>
             )}
@@ -141,6 +124,15 @@ const ModeloMentalVisualizador = ({
                                     {analisis.hayCeldasConMina && (
                                         <p className="text-red-600 mt-1">
                                             ⚠ Todas las celdas sin descubrir tienen minas
+                                        </p>
+                                    )}
+                                    
+                                    {analisis.probabilidad !== null && (
+                                        <p className={`mt-1 ${
+                                            analisis.probabilidad < 0.3 ? 'text-green-600' : 
+                                            analisis.probabilidad < 0.6 ? 'text-orange-600' : 'text-red-600'
+                                        }`}>
+                                            ℹ {Math.round(analisis.probabilidad * 100)}% de probabilidad de mina en cada celda
                                         </p>
                                     )}
                                 </div>

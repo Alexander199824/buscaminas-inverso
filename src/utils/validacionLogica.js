@@ -56,6 +56,7 @@ export const verificarConsistenciaRespuesta = (
 ) => {
     // Crear una copia del tablero con la respuesta propuesta para análisis
     const tableroSimulado = JSON.parse(JSON.stringify(tablero));
+    
     if (respuesta === 'vacío') {
         tableroSimulado[fila][columna] = '';
     } else if (respuesta === 'mina') {
@@ -76,25 +77,10 @@ export const verificarConsistenciaRespuesta = (
     );
     
     if (!contradiccionDirecta.esConsistente) {
-        // Intentar un análisis más profundo antes de rechazar definitivamente
-        const analisisExhaustivo = intentarResolverContradiccion(
-            fila,
-            columna,
-            respuesta,
-            tableroSimulado,
-            celdasDescubiertas,
-            banderas,
-            tamañoSeleccionado,
-            contradiccionDirecta
-        );
-        
-        if (analisisExhaustivo.esConsistente) {
-            return analisisExhaustivo; // Si el análisis profundo encuentra que es posible, aceptamos
-        }
         return contradiccionDirecta;
     }
     
-    // Si no hay contradicciones directas, verificar globalmente
+    // Si no hay contradicciones directas, verificar globalmente el tablero
     return verificarConsistenciaGlobal(
         fila, 
         columna, 
@@ -107,220 +93,8 @@ export const verificarConsistenciaRespuesta = (
 };
 
 /**
- * Intenta resolver una contradicción aparente mediante análisis más exhaustivo
- */
-const intentarResolverContradiccion = (
-    fila,
-    columna,
-    respuesta,
-    tableroSimulado,
-    celdasDescubiertas,
-    banderas,
-    tamañoSeleccionado,
-    contradiccionDetectada
-) => {
-    // Simulamos que la celda ya está descubierta
-    const celdasDescubiertasSimuladas = [
-        ...celdasDescubiertas,
-        { fila, columna }
-    ];
-    
-    // Obtenemos las celdas relacionadas con la contradicción para un análisis más profundo
-    // Esto incluye todas las celdas numéricas que podrían verse afectadas
-    const celdasRelacionadas = obtenerCeldasRelacionadas(
-        fila, 
-        columna, 
-        tableroSimulado, 
-        celdasDescubiertasSimuladas, 
-        tamañoSeleccionado
-    );
-    
-    // Si son pocas celdas relacionadas, hacemos un análisis exhaustivo
-    if (celdasRelacionadas.length <= 8) {
-        // Intentamos encontrar una configuración válida usando backtracking
-        const esResoluble = intentarEncontrarConfiguracionValida(
-            tableroSimulado,
-            celdasDescubiertasSimuladas,
-            banderas,
-            tamañoSeleccionado,
-            celdasRelacionadas
-        );
-        
-        if (esResoluble) {
-            return {
-                esConsistente: true,
-                mensaje: "La respuesta parece inicialmente conflictiva, pero un análisis más profundo muestra que es posible.",
-                contradicciones: []
-            };
-        }
-    }
-    
-    // Si no podemos resolver, mantenemos la contradicción original
-    return contradiccionDetectada;
-};
-
-/**
- * Obtiene todas las celdas relacionadas con una posición para análisis
- */
-const obtenerCeldasRelacionadas = (
-    fila,
-    columna,
-    tablero,
-    celdasDescubiertas,
-    tamañoSeleccionado
-) => {
-    // Comenzamos con las celdas adyacentes directas
-    const adyacentesDirectas = obtenerTodasCeldasAdyacentes(fila, columna, tamañoSeleccionado);
-    
-    // Añadimos las celdas numéricas adyacentes a las adyacentes
-    let celdasRelacionadas = new Set();
-    
-    // Añadir la celda actual y sus adyacentes
-    celdasRelacionadas.add(`${fila},${columna}`);
-    adyacentesDirectas.forEach(c => celdasRelacionadas.add(`${c.fila},${c.columna}`));
-    
-    // Buscar todas las celdas numéricas que están relacionadas
-    adyacentesDirectas.forEach(celda => {
-        const celdasAdyacentes = obtenerTodasCeldasAdyacentes(celda.fila, celda.columna, tamañoSeleccionado);
-        
-        celdasAdyacentes.forEach(adj => {
-            // Si es una celda numérica
-            if (celdasDescubiertas.some(d => d.fila === adj.fila && d.columna === adj.columna) &&
-                tablero[adj.fila][adj.columna] && !isNaN(tablero[adj.fila][adj.columna])) {
-                celdasRelacionadas.add(`${adj.fila},${adj.columna}`);
-                
-                // Añadimos también las adyacentes a esta celda numérica
-                const otrasAdyacentes = obtenerTodasCeldasAdyacentes(adj.fila, adj.columna, tamañoSeleccionado);
-                otrasAdyacentes.forEach(oa => celdasRelacionadas.add(`${oa.fila},${oa.columna}`));
-            }
-        });
-    });
-    
-    // Convertir el Set a un array de objetos {fila, columna}
-    return Array.from(celdasRelacionadas).map(coord => {
-        const [f, c] = coord.split(',').map(Number);
-        return { fila: f, columna: c };
-    });
-};
-
-/**
- * Intenta encontrar una configuración válida usando backtracking
- */
-const intentarEncontrarConfiguracionValida = (
-    tablero,
-    celdasDescubiertas,
-    banderas,
-    tamañoSeleccionado,
-    celdasImportantes
-) => {
-    // Obtenemos las celdas no descubiertas sin bandera que están relacionadas
-    const celdasNoDescubiertasSinBandera = celdasImportantes.filter(celda => {
-        return !celdasDescubiertas.some(d => d.fila === celda.fila && d.columna === celda.columna) &&
-               !banderas.some(b => b.fila === celda.fila && b.columna === celda.columna);
-    });
-    
-    // Obtenemos las celdas numéricas relacionadas
-    const celdasNumericas = celdasImportantes.filter(celda => {
-        return celdasDescubiertas.some(d => d.fila === celda.fila && d.columna === celda.columna) &&
-               tablero[celda.fila][celda.columna] && !isNaN(tablero[celda.fila][celda.columna]);
-    });
-    
-    // Si hay demasiadas celdas para analizar, simplificamos
-    if (celdasNoDescubiertasSinBandera.length > 12) {
-        return true; // Asumimos que hay una solución posible para evitar cálculos excesivos
-    }
-    
-    // Usamos backtracking para probar todas las configuraciones posibles
-    return backtrackingConfiguracion(
-        celdasNoDescubiertasSinBandera,
-        0,
-        banderas,
-        tablero,
-        celdasDescubiertas,
-        tamañoSeleccionado,
-        celdasNumericas
-    );
-};
-
-/**
- * Función recursiva de backtracking para probar configuraciones
- */
-const backtrackingConfiguracion = (
-    celdasNoDescubiertas,
-    indice,
-    banderasActuales,
-    tablero,
-    celdasDescubiertas,
-    tamañoSeleccionado,
-    celdasNumericas
-) => {
-    // Si hemos revisado todas las celdas no descubiertas, verificamos si la configuración es válida
-    if (indice >= celdasNoDescubiertas.length) {
-        return esConfiguracionValida(banderasActuales, tablero, celdasDescubiertas, tamañoSeleccionado, celdasNumericas);
-    }
-    
-    const celdaActual = celdasNoDescubiertas[indice];
-    
-    // Caso 1: Probamos sin poner bandera (celda vacía)
-    const sinBandera = backtrackingConfiguracion(
-        celdasNoDescubiertas,
-        indice + 1,
-        banderasActuales,
-        tablero,
-        celdasDescubiertas,
-        tamañoSeleccionado,
-        celdasNumericas
-    );
-    
-    if (sinBandera) return true;
-    
-    // Caso 2: Probamos poniendo bandera (mina)
-    const conBandera = backtrackingConfiguracion(
-        celdasNoDescubiertas,
-        indice + 1,
-        [...banderasActuales, celdaActual],
-        tablero,
-        celdasDescubiertas,
-        tamañoSeleccionado,
-        celdasNumericas
-    );
-    
-    return conBandera;
-};
-
-/**
- * Verifica si una configuración de banderas es válida para las celdas numéricas dadas
- */
-const esConfiguracionValida = (
-    banderas,
-    tablero,
-    celdasDescubiertas,
-    tamañoSeleccionado,
-    celdasNumericas
-) => {
-    // Verificamos cada celda numérica
-    for (const celda of celdasNumericas) {
-        const { fila, columna } = celda;
-        const numeroMinas = parseInt(tablero[fila][columna]);
-        
-        // Contamos las banderas adyacentes
-        const adyacentes = obtenerTodasCeldasAdyacentes(fila, columna, tamañoSeleccionado);
-        const banderasAdyacentes = adyacentes.filter(adj => 
-            banderas.some(b => b.fila === adj.fila && b.columna === adj.columna)
-        ).length;
-        
-        // Si el número no coincide, la configuración no es válida
-        if (banderasAdyacentes !== numeroMinas) {
-            return false;
-        }
-    }
-    
-    // Si todas las celdas numéricas tienen el número correcto de banderas adyacentes
-    return true;
-};
-
-/**
  * Verifica si la respuesta contradice directamente alguno de los números cercanos
+ * @private
  */
 const verificarContradiccionesDirectas = (
     fila, 
@@ -403,6 +177,7 @@ const verificarContradiccionesDirectas = (
 
 /**
  * Verifica la consistencia global del tablero teniendo en cuenta todas las celdas numéricas
+ * @private
  */
 export const verificarConsistenciaGlobal = (
     filaActual, 
@@ -447,7 +222,7 @@ export const verificarConsistenciaGlobal = (
         };
     }
     
-    // Verificar cada celda numérica por separado - Primera pasada
+    // Verificar cada celda numérica por separado
     for (const celda of celdasConNumero) {
         const { fila, columna } = celda;
         const valor = tableroSimulado[fila][columna];
@@ -486,26 +261,6 @@ export const verificarConsistenciaGlobal = (
                 mensaje: `La celda (${fila + 1},${columna + 1}) indica ${numeroMinas} minas, pero hay ${minasConfirmadas} minas confirmadas cerca.`
             });
             
-            // Intentamos hacer un análisis más profundo antes de rechazar
-            const analisisAvanzado = intentarResolverContradiccion(
-                filaActual,
-                columnaActual,
-                respuestaActual,
-                tableroSimulado,
-                celdasDescubiertas,
-                banderas,
-                tamañoSeleccionado,
-                {
-                    esConsistente: false,
-                    mensaje: contradicciones[0].mensaje,
-                    contradicciones: [contradicciones[0]]
-                }
-            );
-            
-            if (analisisAvanzado.esConsistente) {
-                return analisisAvanzado;
-            }
-            
             // Si encontramos una contradicción clara, terminamos inmediatamente
             return {
                 esConsistente: false,
@@ -537,36 +292,13 @@ export const verificarConsistenciaGlobal = (
                 necesarias: minasRestantes,
                 mensaje: `La celda (${fila + 1},${columna + 1}) necesita ${minasRestantes} minas más, pero solo quedan ${celdasNoDescubiertas} celdas sin descubrir.`
             });
-        }
-    }
-    
-    // Si encontramos contradicciones básicas, intentamos un análisis más profundo
-    if (contradicciones.length > 0) {
-        // Intentamos resolver la contradicción
-        const analisisAvanzado = intentarResolverContradiccion(
-            filaActual,
-            columnaActual,
-            respuestaActual,
-            tableroSimulado,
-            celdasDescubiertas,
-            banderas,
-            tamañoSeleccionado,
-            {
+            
+            return {
                 esConsistente: false,
-                mensaje: contradicciones[0].mensaje,
+                mensaje: contradicciones[0].mensaje || "Se ha detectado una inconsistencia lógica en el tablero.",
                 contradicciones: [contradicciones[0]]
-            }
-        );
-        
-        if (analisisAvanzado.esConsistente) {
-            return analisisAvanzado;
+            };
         }
-        
-        return {
-            esConsistente: false,
-            mensaje: contradicciones[0].mensaje || "Se ha detectado una inconsistencia lógica en el tablero.",
-            contradicciones: [contradicciones[0]]
-        };
     }
     
     // Si llegamos aquí, no se encontraron inconsistencias

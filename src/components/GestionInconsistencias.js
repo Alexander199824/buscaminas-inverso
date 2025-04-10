@@ -1,7 +1,7 @@
 import React from 'react';
 
 /**
- * Componente mejorado para gestionar advertencias de inconsistencias lógicas
+ * Componente para gestionar advertencias de inconsistencias lógicas
  */
 const GestionInconsistencias = ({
     mostrarAdvertencia,
@@ -10,8 +10,6 @@ const GestionInconsistencias = ({
     celdasDescubiertas,
     setMostrarAdvertencia,
     aplicarRespuestaConInconsistencia,
-    modoValidacion,
-    cambiarModoValidacion,
     tema
 }) => {
     if (!mostrarAdvertencia || !inconsistenciaDetectada) return null;
@@ -146,59 +144,19 @@ const GestionInconsistencias = ({
                 {obtenerExplicacionVisual()}
                 
                 <div className="grid grid-cols-2 gap-4 mt-4">
-                    {modoValidacion === 'advertir' && (
-                        <>
-                            <button 
-                                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-                                onClick={() => setMostrarAdvertencia(false)}
-                            >
-                                Corregir mi respuesta
-                            </button>
-                            <button 
-                                className={`px-4 py-2 ${esContradiccionCritica ? 'bg-gray-500 cursor-not-allowed' : 'bg-yellow-600 hover:bg-yellow-700'} text-white rounded`}
-                                onClick={aplicarRespuestaConInconsistencia}
-                                disabled={esContradiccionCritica}
-                            >
-                                {esContradiccionCritica ? 'No permitido' : 'Continuar de todos modos'}
-                            </button>
-                        </>
-                    )}
-                    
-                    {modoValidacion === 'impedir' && (
-                        <button 
-                            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 col-span-2"
-                            onClick={() => setMostrarAdvertencia(false)}
-                        >
-                            Volver y elegir otra respuesta
-                        </button>
-                    )}
-                </div>
-                
-                <div className="mt-4">
-                    <h3 className="font-semibold mb-2">Preferencias de validación:</h3>
-                    <div className="flex justify-center space-x-4">
-                        <button 
-                            className={`px-3 py-1 rounded ${modoValidacion === 'advertir' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-                            onClick={() => cambiarModoValidacion('advertir')}
-                            title="Muestra advertencias pero permite continuar en algunos casos"
-                        >
-                            Advertir
-                        </button>
-                        <button 
-                            className={`px-3 py-1 rounded ${modoValidacion === 'impedir' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-                            onClick={() => cambiarModoValidacion('impedir')}
-                            title="No permite respuestas inconsistentes"
-                        >
-                            Impedir
-                        </button>
-                        <button 
-                            className={`px-3 py-1 rounded ${modoValidacion === 'ignorar' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-                            onClick={() => cambiarModoValidacion('ignorar')}
-                            title="Ignora todas las inconsistencias"
-                        >
-                            Ignorar
-                        </button>
-                    </div>
+                    <button 
+                        className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                        onClick={() => setMostrarAdvertencia(false)}
+                    >
+                        Corregir mi respuesta
+                    </button>
+                    <button 
+                        className={`px-4 py-2 ${esContradiccionCritica ? 'bg-gray-500 cursor-not-allowed' : 'bg-yellow-600 hover:bg-yellow-700'} text-white rounded`}
+                        onClick={aplicarRespuestaConInconsistencia}
+                        disabled={esContradiccionCritica}
+                    >
+                        {esContradiccionCritica ? 'No permitido' : 'Continuar de todos modos'}
+                    </button>
                 </div>
                 
                 <div className="mt-4 text-xs text-gray-500">

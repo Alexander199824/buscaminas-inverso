@@ -30,6 +30,12 @@ const PanelRespuesta = ({
                     Vacío
                 </button>
                 <button
+                    className={`px-3 py-2 border rounded font-medium ${tipoRespuesta === '0' ? tema.botonSeleccionado : tema.botonSecundario}`}
+                    onClick={() => responderContenidoCelda('0')}
+                >
+                    0
+                </button>
+                <button
                     className={`px-3 py-2 border rounded font-medium ${tipoRespuesta === 'mina' ? tema.botonSeleccionado : tema.botonSecundario}`}
                     onClick={() => responderContenidoCelda('mina')}
                 >
@@ -45,6 +51,9 @@ const PanelRespuesta = ({
                     </button>
                 ))}
             </div>
+            <p className="text-sm text-center text-gray-600">
+                Selecciona "Vacío" o "0" para celdas sin minas adyacentes.
+            </p>
         </div>
     );
 };

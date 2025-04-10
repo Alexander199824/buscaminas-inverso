@@ -15,7 +15,7 @@ const CeldaTablero = ({
 }) => {
     const esSeleccionada = celdaActual && celdaActual.fila === fila && celdaActual.columna === columna;
     const tieneBandera = banderas.some(b => b.fila === fila && b.columna === columna);
-    const estaDescubierta = celdasDescubiertas.some(c => c.fila === fila && c.columna === columna);
+    const estaDescubierta = celdasDescubiertas.some(c => c.fila === fila && c.columna === c.columna);
     const contenido = tablero[fila][columna];
 
     // Determinar el tamaño de las celdas según el tamaño del tablero
@@ -52,9 +52,11 @@ const CeldaTablero = ({
 
     // Determinar el color del número según su valor
     let colorNumero = "";
-    if (estaDescubierta && contenido && !isNaN(contenido)) {
-        const num = parseInt(contenido);
+    if (estaDescubierta && contenido && (contenido !== 'M' && contenido !== '')) {
+        // Manejar tanto números como el caso especial del '0'
+        const num = contenido === '0' ? 0 : parseInt(contenido);
         switch (num) {
+            case 0: colorNumero = "text-gray-400"; break; // Color para cero
             case 1: colorNumero = "text-blue-600"; break;
             case 2: colorNumero = "text-green-600"; break;
             case 3: colorNumero = "text-red-600"; break;
@@ -83,7 +85,10 @@ const CeldaTablero = ({
                         <span className="text-lg">💣</span>
                     ) : (
                         <div className="relative">
-                            <span className={colorNumero}>{contenido}</span>
+                            {/* Mostrar el valor 0 o vacío según corresponda */}
+                            <span className={colorNumero}>
+                                {contenido === '' ? '' : (contenido === '0' ? '0' : contenido)}
+                            </span>
                             {esInconsistente && <span className="absolute -top-1 -right-1 text-xs">⚠️</span>}
                         </div>
                     )

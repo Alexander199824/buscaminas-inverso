@@ -3,7 +3,6 @@ import HistorialMovimientos from './HistorialMovimientos';
 import SelectorTamaño from './SelectorTamaño';
 import BotonAccion from './BotonAccion';
 import PanelEstadisticas from './PanelEstadisticas';
-import SelectorValidacion from './SelectorValidacion';
 
 const PanelLateralIzquierdo = ({
     tema,
@@ -21,8 +20,7 @@ const PanelLateralIzquierdo = ({
     banderas,
     celdasDescubiertas,
     historialMovimientos,
-    modoValidacion,
-    cambiarModoValidacion
+    estadisticas
 }) => {
     return (
         <div className={`w-full md:w-1/4 p-4 ${tema.tarjeta} md:min-h-screen`}>
@@ -56,14 +54,6 @@ const PanelLateralIzquierdo = ({
                 tamañosTablero={tamañosTablero}
                 tamañoSeleccionado={tamañoSeleccionado}
                 setTamañoSeleccionado={setTamañoSeleccionado}
-                juegoIniciado={juegoIniciado}
-            />
-
-            {/* Selector de modo de validación */}
-            <SelectorValidacion
-                tema={tema}
-                modoValidacion={modoValidacion}
-                cambiarModoValidacion={cambiarModoValidacion}
                 juegoIniciado={juegoIniciado}
             />
 
