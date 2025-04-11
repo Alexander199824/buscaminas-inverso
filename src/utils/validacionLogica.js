@@ -1,5 +1,6 @@
 /**
  * Funciones para validar la consistencia lógica del tablero de Buscaminas
+ * Implementación avanzada con detección de múltiples tipos de inconsistencias
  */
 
 /**
@@ -35,6 +36,18 @@ export const obtenerTodasCeldasAdyacentes = (fila, columna, tamañoSeleccionado)
 };
 
 /**
+ * Obtiene el número máximo posible de celdas adyacentes
+ * Útil para verificar inconsistencias en esquinas y bordes
+ * @param {number} fila - Fila de la celda
+ * @param {number} columna - Columna de la celda
+ * @param {Object} tamañoSeleccionado - Tamaño del tablero
+ * @returns {number} - Número máximo de celdas adyacentes
+ */
+export const obtenerMaximoCeldasAdyacentes = (fila, columna, tamañoSeleccionado) => {
+    return obtenerTodasCeldasAdyacentes(fila, columna, tamañoSeleccionado).length;
+};
+
+/**
  * Verifica si una respuesta es consistente con el estado actual del tablero
  * @param {number} fila - Fila de la celda a verificar
  * @param {number} columna - Columna de la celda a verificar
@@ -54,6 +67,142 @@ export const verificarConsistenciaRespuesta = (
     banderas, 
     tamañoSeleccionado
 ) => {
+    // VERIFICACIÓN 1: Si es un número, verificar que no sea mayor que el máximo posible
+    if (respuesta !== 'vacío' && respuesta !== 'mina' && !isNaN(respuesta)) {
+        const numeroMinas = parseInt(respuesta);
+        const maximoAdyacentes = obtenerMaximoCeldasAdyacentes(fila, columna, tamañoSeleccionado);
+        
+        if (numeroMinas > maximoAdyacentes) {
+            return {
+                esConsistente: false,
+                mensaje: `Inconsistencia: Has indicado ${numeroMinas} minas, pero esta celda solo puede tener máximo ${maximoAdyacentes} celdas adyacentes por su posición.`,
+                contradicciones: [{
+                    tipo: 'valor_imposible',
+                    celda: { fila, columna },
+                    valor: numeroMinas,
+                    maximo: maximoAdyacentes
+                }]
+            };
+        }
+    }
+
+    // VERIFICACIÓN 2: Si es un número, verificar que no haya más banderas que el número
+    if (respuesta !== 'vacío' && respuesta !== 'mina' && !isNaN(respuesta)) {
+        const numeroMinas = parseInt(respuesta);
+        const celdasAdyacentes = obtenerTodasCeldasAdyacentes(fila, columna, tamañoSeleccionado);
+        
+        // Contar banderas ya colocadas
+        const banderasAdyacentes = celdasAdyacentes.filter(c => 
+            banderas.some(b => b.fila === c.fila && b.columna === c.columna)
+        ).length;
+        
+        if (banderasAdyacentes > numeroMinas) {
+            return {
+                esConsistente: false,
+                mensaje: `Inconsistencia: Has indicado ${numeroMinas} minas, pero ya hay ${banderasAdyacentes} banderas colocadas alrededor.`,
+                contradicciones: [{
+                    tipo: 'exceso_banderas',
+                    celda: { fila, columna },
+                    valor: numeroMinas,
+                    actual: banderasAdyacentes
+                }]
+            };
+        }
+    }
+    
+    // VERIFICACIÓN 3: Si es un número, verificar que haya suficientes celdas sin descubrir para las minas faltantes
+    if (respuesta !== 'vacío' && respuesta !== 'mina' && !isNaN(respuesta)) {
+        const numeroMinas = parseInt(respuesta);
+        const celdasAdyacentes = obtenerTodasCeldasAdyacentes(fila, columna, tamañoSeleccionado);
+        
+        // Contar banderas ya colocadas
+        const banderasAdyacentes = celdasAdyacentes.filter(c => 
+            banderas.some(b => b.fila === c.fila && b.columna === c.columna)
+        ).length;
+        
+        // Contar celdas sin descubrir (excepto la propia celda actual)
+        const celdasSinDescubrir = celdasAdyacentes.filter(c => 
+            !celdasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna) &&
+            !banderas.some(b => b.fila === c.fila && b.columna === c.columna)
+        ).length;
+        
+        const minasFaltantes = numeroMinas - banderasAdyacentes;
+        
+        if (minasFaltantes > celdasSinDescubrir) {
+            return {
+                esConsistente: false,
+                mensaje: `Inconsistencia: Has indicado que faltan ${minasFaltantes} minas, pero solo hay ${celdasSinDescubrir} celdas sin descubrir alrededor.`,
+                contradicciones: [{
+                    tipo: 'minas_insuficientes',
+                    celda: { fila, columna },
+                    valor: numeroMinas,
+                    banderas: banderasAdyacentes,
+                    disponibles: celdasSinDescubrir,
+                    faltantes: minasFaltantes
+                }]
+            };
+        }
+    }
+    
+    // VERIFICACIÓN 4: Si es una mina, verificar que no viole los números adyacentes
+    if (respuesta === 'mina') {
+        // Obtener celdas numéricas adyacentes
+        const celdasAdyacentes = obtenerTodasCeldasAdyacentes(fila, columna, tamañoSeleccionado);
+        const celdasNumericasAdyacentes = celdasAdyacentes.filter(c => 
+            celdasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna) &&
+            tablero[c.fila][c.columna] !== '' && 
+            tablero[c.fila][c.columna] !== 'M' &&
+            !isNaN(tablero[c.fila][c.columna])
+        );
+        
+        // Verificar cada celda numérica adyacente
+        for (const celdaNumerica of celdasNumericasAdyacentes) {
+            const { fila: filaN, columna: columnaN } = celdaNumerica;
+            const valor = parseInt(tablero[filaN][columnaN]);
+            
+            // Contar banderas ya colocadas alrededor de esta celda numérica
+            const celdasAdyacentesN = obtenerTodasCeldasAdyacentes(filaN, columnaN, tamañoSeleccionado);
+            const banderasAdyacentesN = celdasAdyacentesN.filter(c => 
+                banderas.some(b => b.fila === c.fila && b.columna === c.columna)
+            ).length;
+            
+            // Si ya hay suficientes banderas, no puede haber más minas
+            if (banderasAdyacentesN >= valor) {
+                return {
+                    esConsistente: false,
+                    mensaje: `Inconsistencia: Has indicado una mina, pero la celda numérica (${filaN+1},${columnaN+1}) con valor ${valor} ya tiene ${banderasAdyacentesN} banderas colocadas.`,
+                    contradicciones: [{
+                        tipo: 'exceso_minas',
+                        celda: { fila: filaN, columna: columnaN },
+                        valor: valor,
+                        banderas: banderasAdyacentesN
+                    }]
+                };
+            }
+        }
+    }
+    
+    // VERIFICACIÓN 5: Si es un 0 o vacío, verificar que no haya banderas adyacentes
+    if (respuesta === 'vacío' || respuesta === '0') {
+        const celdasAdyacentes = obtenerTodasCeldasAdyacentes(fila, columna, tamañoSeleccionado);
+        const banderasAdyacentes = celdasAdyacentes.filter(c => 
+            banderas.some(b => b.fila === c.fila && b.columna === c.columna)
+        );
+        
+        if (banderasAdyacentes.length > 0) {
+            return {
+                esConsistente: false,
+                mensaje: `Inconsistencia: Has indicado que no hay minas alrededor, pero hay ${banderasAdyacentes.length} banderas colocadas cerca.`,
+                contradicciones: [{
+                    tipo: 'cero_con_banderas',
+                    celda: { fila, columna },
+                    banderas: banderasAdyacentes.length
+                }]
+            };
+        }
+    }
+    
+    // VERIFICACIÓN GLOBAL: Verificar consistencia con todas las celdas numéricas existentes
     // Crear una copia del tablero con la respuesta propuesta para análisis
     const tableroSimulado = JSON.parse(JSON.stringify(tablero));
     
@@ -65,246 +214,154 @@ export const verificarConsistenciaRespuesta = (
         tableroSimulado[fila][columna] = respuesta;
     }
     
-    // Verificar primero si la respuesta contradice directamente los números cercanos
-    const contradiccionDirecta = verificarContradiccionesDirectas(
-        fila, 
-        columna, 
-        respuesta, 
-        tablero, 
-        celdasDescubiertas, 
-        banderas, 
-        tamañoSeleccionado
-    );
+    // Actualizar la lista de celdas descubiertas para incluir la celda actual
+    const nuevasCeldasDescubiertas = [
+        ...celdasDescubiertas.filter(c => !(c.fila === fila && c.columna === columna)),
+        { fila, columna }
+    ];
     
-    if (!contradiccionDirecta.esConsistente) {
-        return contradiccionDirecta;
-    }
-    
-    // Si no hay contradicciones directas, verificar globalmente el tablero
-    return verificarConsistenciaGlobal(
-        fila, 
-        columna, 
-        respuesta, 
-        tablero, 
-        celdasDescubiertas, 
-        banderas, 
-        tamañoSeleccionado
-    );
-};
-
-/**
- * Verifica si la respuesta contradice directamente alguno de los números cercanos
- * @private
- */
-const verificarContradiccionesDirectas = (
-    fila, 
-    columna, 
-    respuesta, 
-    tablero, 
-    celdasDescubiertas, 
-    banderas, 
-    tamañoSeleccionado
-) => {
-    // Caso especial: si estamos colocando una mina, verificar números adyacentes
-    if (respuesta === 'mina') {
-        // Obtener celdas adyacentes que tengan números
-        const celdasAdyacentesConNumero = obtenerTodasCeldasAdyacentes(fila, columna, tamañoSeleccionado)
-            .filter(c => {
-                // Debe estar descubierta y tener un número
-                const estaDescubierta = celdasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna);
-                if (!estaDescubierta) return false;
-                
-                const valor = tablero[c.fila][c.columna];
-                return valor && !isNaN(valor);
-            });
+    // Verificar consistencia con todas las celdas numéricas existentes
+    for (const celda of celdasDescubiertas) {
+        const { fila: filaC, columna: columnaC } = celda;
+        const valor = tablero[filaC][columnaC];
         
-        // Para cada celda con número, verificar si ya tiene suficientes minas
-        for (const celdaNum of celdasAdyacentesConNumero) {
-            const numeroMinas = parseInt(tablero[celdaNum.fila][celdaNum.columna]);
+        // Solo verificar celdas con números
+        if (!isNaN(valor) && valor !== '') {
+            const numeroMinas = parseInt(valor);
             
-            // Contar banderas adyacentes a este número
-            const banderasAdyacentes = obtenerTodasCeldasAdyacentes(celdaNum.fila, celdaNum.columna, tamañoSeleccionado)
-                .filter(c => banderas.some(b => b.fila === c.fila && b.columna === c.columna))
-                .length;
+            // Obtener celdas adyacentes
+            const celdasAdyacentes = obtenerTodasCeldasAdyacentes(filaC, columnaC, tamañoSeleccionado);
             
-            // Si ya tiene suficientes banderas, no puede haber más minas
-            if (banderasAdyacentes >= numeroMinas) {
+            // Contar minas confirmadas (banderas + la nueva respuesta si es mina)
+            const minasConfirmadas = celdasAdyacentes.filter(c => {
+                // Es una bandera
+                if (banderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
+                    return true;
+                }
+                
+                // Es la celda actual y es una mina
+                if (c.fila === fila && c.columna === columna && respuesta === 'mina') {
+                    return true;
+                }
+                
+                return false;
+            }).length;
+            
+            // Si hay más minas confirmadas que el número, hay una inconsistencia
+            if (minasConfirmadas > numeroMinas) {
                 return {
                     esConsistente: false,
-                    mensaje: `Inconsistencia: la celda (${celdaNum.fila + 1},${celdaNum.columna + 1}) indica ${numeroMinas} minas, pero ya hay ${banderasAdyacentes} banderas colocadas. No puede haber otra mina en (${fila + 1},${columna + 1}).`,
+                    mensaje: `Inconsistencia: La celda (${filaC+1},${columnaC+1}) indica ${numeroMinas} minas, pero con tu respuesta habría ${minasConfirmadas} minas confirmadas cerca.`,
                     contradicciones: [{
-                        tipo: 'exceso_banderas',
-                        celda: celdaNum,
+                        tipo: 'exceso_minas_global',
+                        celda: { fila: filaC, columna: columnaC },
                         valor: numeroMinas,
-                        actual: banderasAdyacentes + 1 // +1 por la nueva mina
+                        confirmadas: minasConfirmadas
+                    }]
+                };
+            }
+            
+            // Contar celdas sin descubrir restantes
+            const celdasSinDescubrir = celdasAdyacentes.filter(c => {
+                // No está descubierta (excepto si es la celda actual y no es mina)
+                const estaDescubierta = nuevasCeldasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna);
+                
+                // No tiene bandera
+                const tieneBandera = banderas.some(b => b.fila === c.fila && b.columna === c.columna);
+                
+                return !estaDescubierta && !tieneBandera;
+            }).length;
+            
+            // Verificar si faltan celdas para colocar las minas necesarias
+            const minasRestantes = numeroMinas - minasConfirmadas;
+            if (minasRestantes > celdasSinDescubrir) {
+                return {
+                    esConsistente: false,
+                    mensaje: `Inconsistencia: La celda (${filaC+1},${columnaC+1}) necesita ${minasRestantes} minas más, pero solo quedan ${celdasSinDescubrir} celdas sin descubrir.`,
+                    contradicciones: [{
+                        tipo: 'faltan_celdas',
+                        celda: { fila: filaC, columna: columnaC },
+                        valor: numeroMinas,
+                        restantes: celdasSinDescubrir,
+                        necesarias: minasRestantes
                     }]
                 };
             }
         }
     }
     
-    // Caso especial: si estamos colocando un número, verificar si tiene demasiadas banderas
-    if (!isNaN(respuesta)) {
-        const numeroMinas = parseInt(respuesta);
-        
-        // Contar banderas adyacentes
-        const banderasAdyacentes = obtenerTodasCeldasAdyacentes(fila, columna, tamañoSeleccionado)
-            .filter(c => banderas.some(b => b.fila === c.fila && b.columna === c.columna))
-            .length;
-        
-        // Si hay más banderas que el número, hay una contradicción
-        if (banderasAdyacentes > numeroMinas) {
-            return {
-                esConsistente: false,
-                mensaje: `Inconsistencia: has indicado ${numeroMinas} minas, pero ya hay ${banderasAdyacentes} banderas colocadas alrededor.`,
-                contradicciones: [{
-                    tipo: 'exceso_banderas',
-                    celda: { fila, columna },
-                    valor: numeroMinas,
-                    actual: banderasAdyacentes
-                }]
-            };
-        }
-    }
-    
-    // Si no hay contradicciones directas
+    // Si no se encontraron inconsistencias
     return {
         esConsistente: true,
-        mensaje: "No hay contradicciones directas.",
+        mensaje: "La respuesta es consistente con el estado actual del tablero.",
         contradicciones: []
     };
 };
 
 /**
- * Verifica la consistencia global del tablero teniendo en cuenta todas las celdas numéricas
- * @private
+ * Verificar consistencia global del tablero
+ * @param {Array} tablero - Estado del tablero
+ * @param {object} tamañoSeleccionado - Tamaño del tablero
+ * @param {Array} celdasDescubiertas - Celdas descubiertas
+ * @param {Array} banderas - Banderas colocadas
+ * @returns {object} - Resultado de la verificación global
  */
-export const verificarConsistenciaGlobal = (
-    filaActual, 
-    columnaActual, 
-    respuestaActual, 
-    tablero, 
-    celdasDescubiertas, 
-    banderas, 
-    tamañoSeleccionado
-) => {
-    // Crear una copia del tablero con la respuesta actual
-    const tableroSimulado = JSON.parse(JSON.stringify(tablero));
-    if (respuestaActual === 'vacío') {
-        tableroSimulado[filaActual][columnaActual] = '';
-    } else if (respuestaActual === 'mina') {
-        tableroSimulado[filaActual][columnaActual] = 'M';
-    } else {
-        tableroSimulado[filaActual][columnaActual] = respuestaActual;
-    }
+export const verificarConsistenciaGlobal = (tablero, tamañoSeleccionado, celdasDescubiertas, banderas) => {
+    const inconsistencias = [];
     
-    // Lista para almacenar contradicciones encontradas
-    const contradicciones = [];
-    
-    // Actualizar la lista de celdas descubiertas para incluir la celda actual
-    const nuevasCeldasDescubiertas = [
-        ...celdasDescubiertas.filter(c => !(c.fila === filaActual && c.columna === columnaActual)),
-        { fila: filaActual, columna: columnaActual }
-    ];
-    
-    // Obtener todas las celdas con números
-    const celdasConNumero = nuevasCeldasDescubiertas.filter(c => {
-        const valor = tableroSimulado[c.fila][c.columna];
-        return valor && !isNaN(valor);
+    // Verificar cada celda con número
+    celdasDescubiertas.forEach(celda => {
+        const { fila, columna } = celda;
+        const valor = tablero[fila][columna];
+        
+        // Solo verificar celdas con números
+        if (!isNaN(valor) && valor !== '') {
+            const numeroMinas = parseInt(valor);
+            
+            // Obtener celdas adyacentes
+            const celdasAdyacentes = obtenerTodasCeldasAdyacentes(fila, columna, tamañoSeleccionado);
+            
+            // Contar banderas adyacentes
+            const banderasAdyacentes = celdasAdyacentes.filter(c => 
+                banderas.some(b => b.fila === c.fila && b.columna === c.columna)
+            ).length;
+            
+            // Si hay más banderas que el número, hay una inconsistencia
+            if (banderasAdyacentes > numeroMinas) {
+                inconsistencias.push({
+                    tipo: 'exceso_banderas_global',
+                    celda: { fila, columna },
+                    valor: numeroMinas,
+                    banderas: banderasAdyacentes,
+                    mensaje: `La celda (${fila+1},${columna+1}) indica ${numeroMinas} minas, pero hay ${banderasAdyacentes} banderas colocadas.`
+                });
+            }
+            
+            // Contar celdas sin descubrir
+            const celdasSinDescubrir = celdasAdyacentes.filter(c => {
+                const estaDescubierta = celdasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna);
+                const tieneBandera = banderas.some(b => b.fila === c.fila && b.columna === c.columna);
+                return !estaDescubierta && !tieneBandera;
+            }).length;
+            
+            // Verificar si faltan celdas para colocar las minas necesarias
+            const minasRestantes = numeroMinas - banderasAdyacentes;
+            if (minasRestantes > celdasSinDescubrir) {
+                inconsistencias.push({
+                    tipo: 'faltan_celdas_global',
+                    celda: { fila, columna },
+                    valor: numeroMinas,
+                    banderas: banderasAdyacentes,
+                    restantes: celdasSinDescubrir,
+                    necesarias: minasRestantes,
+                    mensaje: `La celda (${fila+1},${columna+1}) necesita ${minasRestantes} minas más, pero solo quedan ${celdasSinDescubrir} celdas sin descubrir.`
+                });
+            }
+        }
     });
     
-    // Si no hay celdas con números, no hay restricciones que verificar
-    if (celdasConNumero.length === 0) {
-        return {
-            esConsistente: true,
-            mensaje: "La respuesta es consistente con el estado actual del tablero.",
-            contradicciones: []
-        };
-    }
-    
-    // Verificar cada celda numérica por separado
-    for (const celda of celdasConNumero) {
-        const { fila, columna } = celda;
-        const valor = tableroSimulado[fila][columna];
-        const numeroMinas = parseInt(valor);
-        
-        // Obtener celdas adyacentes
-        const celdasAdyacentes = obtenerTodasCeldasAdyacentes(fila, columna, tamañoSeleccionado);
-        
-        // Contar banderas y celdas marcadas como mina
-        const minasConfirmadas = celdasAdyacentes.filter(c => {
-            // Es una bandera
-            if (banderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
-                return true;
-            }
-            
-            // Es la celda actual y es una mina
-            if (c.fila === filaActual && c.columna === columnaActual && respuestaActual === 'mina') {
-                return true;
-            }
-            
-            // Es una celda marcada como mina en el tablero
-            if (tableroSimulado[c.fila][c.columna] === 'M') {
-                return true;
-            }
-            
-            return false;
-        }).length;
-        
-        // CRÍTICO: Verificar si hay demasiadas minas confirmadas
-        if (minasConfirmadas > numeroMinas) {
-            contradicciones.push({
-                tipo: 'exceso_minas',
-                celda: { fila, columna },
-                valor: numeroMinas,
-                confirmadas: minasConfirmadas,
-                mensaje: `La celda (${fila + 1},${columna + 1}) indica ${numeroMinas} minas, pero hay ${minasConfirmadas} minas confirmadas cerca.`
-            });
-            
-            // Si encontramos una contradicción clara, terminamos inmediatamente
-            return {
-                esConsistente: false,
-                mensaje: `Inconsistencia: la celda (${fila + 1},${columna + 1}) indica ${numeroMinas} minas, pero hay ${minasConfirmadas} minas confirmadas cerca.`,
-                contradicciones: [contradicciones[0]]
-            };
-        }
-        
-        // Celdas sin descubrir para posibles minas futuras
-        const celdasNoDescubiertas = celdasAdyacentes.filter(c => {
-            // No está descubierta (excepto la celda actual que estamos evaluando)
-            const estaDescubierta = celdasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna) ||
-                                 (c.fila === filaActual && c.columna === columnaActual && respuestaActual !== 'mina');
-            
-            // No tiene bandera
-            const tieneBandera = banderas.some(b => b.fila === c.fila && b.columna === c.columna);
-            
-            return !estaDescubierta && !tieneBandera;
-        }).length;
-        
-        // Verificar si faltan celdas para colocar las minas necesarias
-        const minasRestantes = numeroMinas - minasConfirmadas;
-        if (minasRestantes > celdasNoDescubiertas) {
-            contradicciones.push({
-                tipo: 'faltan_celdas',
-                celda: { fila, columna },
-                valor: numeroMinas,
-                restantes: celdasNoDescubiertas,
-                necesarias: minasRestantes,
-                mensaje: `La celda (${fila + 1},${columna + 1}) necesita ${minasRestantes} minas más, pero solo quedan ${celdasNoDescubiertas} celdas sin descubrir.`
-            });
-            
-            return {
-                esConsistente: false,
-                mensaje: contradicciones[0].mensaje || "Se ha detectado una inconsistencia lógica en el tablero.",
-                contradicciones: [contradicciones[0]]
-            };
-        }
-    }
-    
-    // Si llegamos aquí, no se encontraron inconsistencias
     return {
-        esConsistente: true,
-        mensaje: "La respuesta es consistente con el estado actual del tablero.",
-        contradicciones: []
+        esConsistente: inconsistencias.length === 0,
+        inconsistencias
     };
 };

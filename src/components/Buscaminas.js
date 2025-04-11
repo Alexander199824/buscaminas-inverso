@@ -5,10 +5,9 @@ import PanelLateralDerecho from './PanelLateralDerecho';
 import ModalAnimacion from './ModalAnimacion';
 import PanelRespuesta from './PanelRespuesta';
 import GestionInconsistencias from './GestionInconsistencias';
-import ModeloMentalVisualizador from './ModeloMentalVisualizador';
 import { obtenerClasesTema } from '../utils/temas';
-import { analizarTablero, seleccionarPrimeraCeldaSegura, obtenerCeldasInicialesSeguras } from '../utils/logicaJuego';
-import { verificarConsistenciaRespuesta } from '../utils/validacionLogica';
+import { seleccionarPrimeraCeldaSegura, analizarTablero, obtenerCeldasAdyacentes } from '../utils/logicaJuego';
+import { verificarConsistenciaRespuesta, verificarConsistenciaGlobal } from '../utils/validacionLogica';
 import { TAMAÑOS_TABLERO, DURACION_ANIMACION, DURACION_MODAL } from '../constants/gameConfig';
 
 const Buscaminas = () => {
@@ -79,7 +78,11 @@ const Buscaminas = () => {
             // Configurar análisis periódico del tablero
             const busquedaIntervalo = setInterval(() => {
                 if (!stateRef.current.esperandoRespuesta && !stateRef.current.juegoTerminado) {
-                    realizarAnalisisTablero();
+                    try {
+                        realizarAnalisisTablero();
+                    } catch (error) {
+                        console.error("Error en análisis periódico:", error);
+                    }
                 }
             }, 3000);
             setIntervaloBusqueda(busquedaIntervalo);
@@ -164,120 +167,148 @@ const Buscaminas = () => {
         }
     };
 
-    // Iniciar el juego - Seleccionar primera celda
+    // Iniciar el juego - Seleccionar primera celda aleatoria
     const iniciarJuego = () => {
         setJuegoIniciado(true);
 
-        // Obtener una celda inicial para el primer movimiento
-        const celdaInicial = seleccionarPrimeraCeldaSegura(tamañoSeleccionado);
-        
-        seleccionarCelda(celdaInicial.fila, celdaInicial.columna);
-        setMensajeSistema(`El sistema ha seleccionado la casilla (${celdaInicial.fila + 1},${celdaInicial.columna + 1}). ¿Qué hay en esta casilla?`);
-        setAnimacion('iniciar');
-        
-        // Inicializar estadísticas para la partida actual
-        setEstadisticas(prev => ({
-            ...prev,
-            movimientos: 0,
-            banderasColocadas: 0,
-            celdasSeguras: 0
-        }));
-    };
-
-    // Realizar análisis del tablero para encontrar banderas y la próxima jugada
-    const realizarAnalisisTablero = () => {
-        console.log("Realizando análisis de tablero...");
-        
-        // Usar stateRef para tener los valores más actualizados
-        const { tablero, tamañoSeleccionado, celdasDescubiertas, banderas, historialMovimientos } = stateRef.current;
-        
-        // Analizar el tablero para decidir la siguiente jugada
-        const resultadoAnalisis = analizarTablero({
-            tablero,
-            tamañoTablero: tamañoSeleccionado,
-            celdasDescubiertas,
-            banderas,
-            historialMovimientos,
-            setMensajeSistema,
-            setAnimacion
-        });
-        
-        // Actualizar banderas si se encontraron nuevas
-        if (resultadoAnalisis.banderas.length > banderas.length) {
-            setBanderas(resultadoAnalisis.banderas);
+        try {
+            // Obtener una celda inicial aleatoria garantizando variabilidad
+            const celdaInicial = seleccionarPrimeraCeldaSegura(tamañoSeleccionado);
             
-            // Actualizar historial con las nuevas banderas
-            const nuevoHistorial = [...historialMovimientos];
-            resultadoAnalisis.movimientosGenerados.forEach(movimiento => {
-                if (movimiento.esAccion && movimiento.accion === "bandera") {
-                    nuevoHistorial.push(movimiento);
-                }
-            });
-            setHistorialMovimientos(nuevoHistorial);
+            seleccionarCelda(celdaInicial.fila, celdaInicial.columna);
+            setMensajeSistema(`El sistema ha seleccionado la casilla (${celdaInicial.fila + 1},${celdaInicial.columna + 1}). ¿Qué hay en esta casilla?`);
+            setAnimacion('iniciar');
             
-            // Actualizar estadísticas
+            // Inicializar estadísticas para la partida actual
             setEstadisticas(prev => ({
                 ...prev,
-                banderasColocadas: resultadoAnalisis.banderas.length
+                movimientos: 0,
+                banderasColocadas: 0,
+                celdasSeguras: 0
             }));
-            
-            // Mostrar animación
-            setAnimacion('bandera');
+        } catch (error) {
+            console.error("Error al iniciar juego:", error);
+            // En caso de error, seleccionar la primera celda
+            seleccionarCelda(0, 0);
+            setMensajeSistema("El sistema ha seleccionado la primera casilla. ¿Qué hay en esta casilla?");
         }
-        
-        // Si hay una siguiente celda, seleccionarla después de una breve pausa
-        if (resultadoAnalisis.siguienteCelda) {
-            setTimeout(() => {
-                if (!stateRef.current.esperandoRespuesta && !stateRef.current.juegoTerminado) {
-                    seleccionarCelda(
-                        resultadoAnalisis.siguienteCelda.fila, 
-                        resultadoAnalisis.siguienteCelda.columna
-                    );
+    };
+
+    // Realizar análisis del tablero para encontrar la próxima jugada
+    const realizarAnalisisTablero = () => {
+        try {
+            // Asegurarse de que stateRef tenga valores válidos
+            const validTablero = stateRef.current.tablero || tablero;
+            const validTamañoTablero = stateRef.current.tamañoSeleccionado || tamañoSeleccionado;
+            const validCeldasDescubiertas = stateRef.current.celdasDescubiertas || celdasDescubiertas;
+            const validBanderas = stateRef.current.banderas || banderas;
+            const validHistorialMovimientos = stateRef.current.historialMovimientos || historialMovimientos;
+            
+            // Analizar el tablero para decidir la siguiente jugada
+            const resultadoAnalisis = analizarTablero({
+                tablero: validTablero,
+                tamañoTablero: validTamañoTablero,
+                celdasDescubiertas: validCeldasDescubiertas,
+                banderas: validBanderas,
+                historialMovimientos: validHistorialMovimientos,
+                setMensajeSistema,
+                setAnimacion
+            });
+            
+            // Actualizar banderas si se encontraron nuevas
+            if (resultadoAnalisis.banderas && resultadoAnalisis.banderas.length > validBanderas.length) {
+                setBanderas(resultadoAnalisis.banderas);
+                
+                // Actualizar historial con las nuevas banderas
+                let nuevoHistorial = [...validHistorialMovimientos];
+                if (resultadoAnalisis.movimientosGenerados && resultadoAnalisis.movimientosGenerados.length > 0) {
+                    resultadoAnalisis.movimientosGenerados.forEach(movimiento => {
+                        if (movimiento.esAccion && movimiento.accion === "bandera") {
+                            nuevoHistorial.push(movimiento);
+                        }
+                    });
+                    setHistorialMovimientos(nuevoHistorial);
                 }
-            }, 1000);
+                
+                // Actualizar estadísticas
+                setEstadisticas(prev => ({
+                    ...prev,
+                    banderasColocadas: resultadoAnalisis.banderas.length
+                }));
+                
+                // Mostrar animación
+                setAnimacion('bandera');
+            }
+            
+            // Si hay una siguiente celda, seleccionarla después de una breve pausa
+            if (resultadoAnalisis.siguienteCelda) {
+                setTimeout(() => {
+                    try {
+                        if (!stateRef.current.esperandoRespuesta && !stateRef.current.juegoTerminado) {
+                            seleccionarCelda(
+                                resultadoAnalisis.siguienteCelda.fila, 
+                                resultadoAnalisis.siguienteCelda.columna
+                            );
+                        }
+                    } catch (error) {
+                        console.error("Error al seleccionar siguiente celda:", error);
+                    }
+                }, 1000);
+            } else {
+                // Si no hay siguientes celdas, verificar victoria
+                verificarVictoria();
+            }
+        } catch (error) {
+            console.error("Error en análisis del tablero:", error);
+            // No hacer nada más, dejemos que el juego siga su curso normal
         }
     };
 
     // Sistema selecciona una celda
     const seleccionarCelda = (fila, columna) => {
-        console.log(`Intentando seleccionar celda (${fila},${columna})`);
+        try {
+            // Verificar si el juego ha terminado
+            if (stateRef.current.juegoTerminado) {
+                return;
+            }
+            
+            // Verificar si ya estamos esperando una respuesta
+            if (stateRef.current.esperandoRespuesta) {
+                return;
+            }
 
-        // Verificar si el juego ha terminado
-        if (stateRef.current.juegoTerminado) {
-            console.log("No se puede seleccionar: juego terminado");
-            return;
-        }
-        
-        // Verificar si ya estamos esperando una respuesta
-        if (stateRef.current.esperandoRespuesta) {
-            console.log("No se puede seleccionar: esperando respuesta");
-            return;
-        }
+            // Validar que las coordenadas son correctas
+            if (fila === undefined || columna === undefined || 
+                fila < 0 || columna < 0 || 
+                fila >= tamañoSeleccionado.filas || columna >= tamañoSeleccionado.columnas) {
+                console.error("Coordenadas de celda inválidas:", fila, columna);
+                return;
+            }
 
-        // Verificar si la celda ya ha sido descubierta
-        if (stateRef.current.celdasDescubiertas.some(c => c.fila === fila && c.columna === columna)) {
-            console.log("Celda ya descubierta, seleccionando otra...");
-            realizarAnalisisTablero();
-            return;
-        }
+            // Verificar si la celda ya ha sido descubierta
+            if (stateRef.current.celdasDescubiertas.some(c => c.fila === fila && c.columna === columna)) {
+                realizarAnalisisTablero();
+                return;
+            }
 
-        // Verificar si la celda ya tiene una bandera
-        if (stateRef.current.banderas.some(b => b.fila === fila && b.columna === columna)) {
-            console.log("Celda con bandera, seleccionando otra...");
-            realizarAnalisisTablero();
-            return;
-        }
+            // Verificar si la celda ya tiene una bandera
+            if (stateRef.current.banderas.some(b => b.fila === fila && b.columna === columna)) {
+                realizarAnalisisTablero();
+                return;
+            }
 
-        console.log(`Seleccionando celda (${fila},${columna})`);
-        setCeldaActual({ fila, columna });
-        setEsperandoRespuesta(true);
-        setAnimacion('seleccionar');
-        
-        // Actualizar estadísticas
-        setEstadisticas(prev => ({
-            ...prev,
-            movimientos: prev.movimientos + 1
-        }));
+            setCeldaActual({ fila, columna });
+            setEsperandoRespuesta(true);
+            setAnimacion('seleccionar');
+            
+            // Actualizar estadísticas
+            setEstadisticas(prev => ({
+                ...prev,
+                movimientos: prev.movimientos + 1
+            }));
+        } catch (error) {
+            console.error("Error al seleccionar celda:", error);
+        }
     };
 
     // Aplicar una respuesta a pesar de la inconsistencia
@@ -349,124 +380,128 @@ const Buscaminas = () => {
 
     // Respuesta del usuario sobre el contenido de la celda
     const responderContenidoCelda = (tipo) => {
-        console.log("Respondiendo contenido de celda:", tipo);
-        
-        if (!celdaActual || !esperandoRespuesta) {
-            console.log("No se puede responder: no hay celda actual o no esperando respuesta");
-            return;
-        }
-
-        const { fila, columna } = celdaActual;
-        setTipoRespuesta(tipo);
-
-         // Verificar la consistencia lógica de la respuesta
-    const resultadoValidacion = verificarConsistenciaRespuesta(
-        fila,
-        columna,
-        tipo,
-        tablero,
-        celdasDescubiertas,
-        banderas,
-        tamañoSeleccionado
-    );
-
-    // Si detectamos una inconsistencia
-    if (!resultadoValidacion.esConsistente) {
-        console.log("Inconsistencia detectada:", resultadoValidacion.mensaje);
-        setInconsistenciaDetectada(resultadoValidacion);
-        
-        // Determinar si es una inconsistencia crítica
-        const esInconsistenciaCritica = resultadoValidacion.contradicciones.some(
-            c => c.tipo === 'exceso_minas' || c.tipo === 'exceso_banderas'
-        );
-        
-        if (esInconsistenciaCritica) {
-            setMostrarAdvertencia(true);
-            return; // No permitir continuar con contradicciones críticas
-        }
-        
-        // Mostrar advertencia pero permitir continuar
-        setMostrarAdvertencia(true);
-        return;
-    }
-
-    // Actualizar el tablero con la respuesta del usuario
-    const nuevoTablero = [...tablero];
-
-    if (tipo === 'vacío' || tipo === '0') {
-        // Considerar tanto 'vacío' como '0' como equivalentes
-        nuevoTablero[fila][columna] = tipo === 'vacío' ? '' : '0';
-    } else if (tipo === 'mina') {
-        nuevoTablero[fila][columna] = 'M';
-    } else {
-        nuevoTablero[fila][columna] = tipo;
-    }
-
-    setTablero(nuevoTablero);
-
-    // Marcar la celda como descubierta
-    const nuevasCeldasDescubiertas = [...celdasDescubiertas, { fila, columna }];
-    setCeldasDescubiertas(nuevasCeldasDescubiertas);
-
-    // Añadir al historial
-    const nuevoHistorial = [...historialMovimientos, {
-        fila,
-        columna,
-        contenido: tipo,
-        inconsistente: false
-    }];
-    setHistorialMovimientos(nuevoHistorial);
-
-    // Actualizar estadísticas
-    if (tipo === 'vacío' || tipo === '0' || !isNaN(tipo)) {
-        setEstadisticas(prev => ({
-            ...prev,
-            celdasSeguras: prev.celdasSeguras + 1
-        }));
-    }
-
-    // IMPORTANTE: Actualizar inmediatamente el stateRef para que tenga los valores actualizados
-    stateRef.current = {
-        ...stateRef.current,
-        tablero: nuevoTablero,
-        celdasDescubiertas: nuevasCeldasDescubiertas,
-        historialMovimientos: nuevoHistorial
-    };
-
-    // Verificar si el sistema ha perdido (encontró una mina)
-    if (tipo === 'mina') {
-        setJuegoTerminado(true);
-        stateRef.current.juegoTerminado = true;
-        setMensajeSistema("¡BOOM! El sistema encontró una mina.");
-        setAnimacion('explosion');
-        setMostrarModal(true);
-        setMensajeModal('¡PUM! Has ganado. El sistema encontró una mina. ¿Quieres intentar de nuevo?');
-        setTipoModal('error');
-        setEsperandoRespuesta(false);
-        stateRef.current.esperandoRespuesta = false;
-        
-        // Actualizar estadísticas
-        setEstadisticas(prev => ({
-            ...prev,
-            partidasJugadas: prev.partidasJugadas + 1,
-            victorias: prev.victorias + 1,
-            tiempoTotal: prev.tiempoTotal + tiempoJuego
-        }));
-    } else {
-        // IMPORTANTE: Desactivar esperandoRespuesta ANTES de llamar a la siguiente selección
-        setEsperandoRespuesta(false);
-        stateRef.current.esperandoRespuesta = false;
-        
-        setAnimacion('respuesta');
-
-        // Analizar el tablero para buscar nuevos patrones
-        setTimeout(() => {
-            if (!stateRef.current.juegoTerminado) {
-                realizarAnalisisTablero();
+        try {
+            if (!celdaActual || !esperandoRespuesta) {
+                return;
             }
-        }, 1000);
-    }
-};
+
+            const { fila, columna } = celdaActual;
+            setTipoRespuesta(tipo);
+
+            // Verificar la consistencia lógica de la respuesta
+            const resultadoValidacion = verificarConsistenciaRespuesta(
+                fila,
+                columna,
+                tipo,
+                tablero,
+                celdasDescubiertas,
+                banderas,
+                tamañoSeleccionado
+            );
+
+            // Si detectamos una inconsistencia
+            if (!resultadoValidacion.esConsistente) {
+                setInconsistenciaDetectada(resultadoValidacion);
+                
+                // Determinar si es una inconsistencia crítica
+                const esInconsistenciaCritica = resultadoValidacion.contradicciones.some(
+                    c => c.tipo === 'exceso_minas' || c.tipo === 'exceso_banderas'
+                );
+                
+                if (esInconsistenciaCritica) {
+                    setMostrarAdvertencia(true);
+                    return; // No permitir continuar con contradicciones críticas
+                }
+                
+                // Mostrar advertencia pero permitir continuar
+                setMostrarAdvertencia(true);
+                return;
+            }
+
+            // Actualizar el tablero con la respuesta del usuario
+            const nuevoTablero = [...tablero];
+
+            if (tipo === 'vacío' || tipo === '0') {
+                // Considerar tanto 'vacío' como '0' como equivalentes
+                nuevoTablero[fila][columna] = tipo === 'vacío' ? '' : '0';
+            } else if (tipo === 'mina') {
+                nuevoTablero[fila][columna] = 'M';
+            } else {
+                nuevoTablero[fila][columna] = tipo;
+            }
+
+            setTablero(nuevoTablero);
+
+            // Marcar la celda como descubierta
+            const nuevasCeldasDescubiertas = [...celdasDescubiertas, { fila, columna }];
+            setCeldasDescubiertas(nuevasCeldasDescubiertas);
+
+            // Añadir al historial
+            const nuevoHistorial = [...historialMovimientos, {
+                fila,
+                columna,
+                contenido: tipo,
+                inconsistente: false
+            }];
+            setHistorialMovimientos(nuevoHistorial);
+
+            // Actualizar estadísticas
+            if (tipo === 'vacío' || tipo === '0' || !isNaN(tipo)) {
+                setEstadisticas(prev => ({
+                    ...prev,
+                    celdasSeguras: prev.celdasSeguras + 1
+                }));
+            }
+
+            // IMPORTANTE: Actualizar inmediatamente el stateRef para que tenga los valores actualizados
+            stateRef.current = {
+                ...stateRef.current,
+                tablero: nuevoTablero,
+                celdasDescubiertas: nuevasCeldasDescubiertas,
+                historialMovimientos: nuevoHistorial
+            };
+
+            // Verificar si el sistema ha perdido (encontró una mina)
+            if (tipo === 'mina') {
+                setJuegoTerminado(true);
+                stateRef.current.juegoTerminado = true;
+                setMensajeSistema("¡BOOM! El sistema encontró una mina.");
+                setAnimacion('explosion');
+                setMostrarModal(true);
+                setMensajeModal('¡PUM! Has ganado. El sistema encontró una mina. ¿Quieres intentar de nuevo?');
+                setTipoModal('error');
+                setEsperandoRespuesta(false);
+                stateRef.current.esperandoRespuesta = false;
+                
+                // Actualizar estadísticas
+                setEstadisticas(prev => ({
+                    ...prev,
+                    partidasJugadas: prev.partidasJugadas + 1,
+                    victorias: prev.victorias + 1,
+                    tiempoTotal: prev.tiempoTotal + tiempoJuego
+                }));
+            } else {
+                // IMPORTANTE: Desactivar esperandoRespuesta ANTES de llamar a la siguiente selección
+                setEsperandoRespuesta(false);
+                stateRef.current.esperandoRespuesta = false;
+                
+                setAnimacion('respuesta');
+
+                // Analizar el tablero para buscar nuevos patrones
+                setTimeout(() => {
+                    if (!stateRef.current.juegoTerminado) {
+                        realizarAnalisisTablero();
+                    }
+                }, 1000);
+            }
+        } catch (error) {
+            console.error("Error al responder contenido de celda:", error);
+            
+            // Restablecer estado en caso de error
+            setEsperandoRespuesta(false);
+            stateRef.current.esperandoRespuesta = false;
+        }
+    };
 
     // Verificar si todas las celdas seguras han sido descubiertas (victoria)
     const verificarVictoria = () => {
@@ -591,17 +626,7 @@ const Buscaminas = () => {
                         />
                     )}
 
-                    {/* Visualizador de modelo mental (solo visible durante el juego) */}
-                    {juegoIniciado && !juegoTerminado && (
-                        <ModeloMentalVisualizador
-                            tablero={tablero}
-                            tamañoSeleccionado={tamañoSeleccionado}
-                            celdasDescubiertas={celdasDescubiertas}
-                            banderas={banderas}
-                            celdaActual={celdaActual}
-                            tema={tema}
-                        />
-                    )}
+                    {/* Nota: El ModeloMentalVisualizador fue eliminado para que no se muestre en la interfaz */}
 
                     <TableroJuego 
                         tablero={tablero}
