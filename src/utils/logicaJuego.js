@@ -1,5 +1,6 @@
 /**
- * Implementación de lógica de buscaminas con análisis global y resolución avanzada
+ * Implementación mejorada de lógica de buscaminas con análisis global y resolución avanzada
+ * Esta versión corrige varios problemas del algoritmo original y añade funcionalidades avanzadas
  */
 
 /**
@@ -42,7 +43,13 @@ export const obtenerCeldasAdyacentes = (fila, columna, tamañoTablero) => {
 };
 
 /**
- * Seleccionar una celda aleatoria para el primer movimiento
+ * Historial de selecciones para evitar repetir celdas en aleatorios
+ * @type {Array<string>}
+ */
+let historialSeleccionesAleatorias = [];
+
+/**
+ * Seleccionar una celda aleatoria para el primer movimiento, evitando repeticiones
  * @param {object} tamañoTablero - Objeto con filas y columnas del tablero
  * @returns {object} - Celda seleccionada {fila, columna}
  */
@@ -55,19 +62,541 @@ export const seleccionarPrimeraCeldaSegura = (tamañoTablero) => {
     
     const { filas, columnas } = tamañoTablero;
     
-    // Agregar aleatoriedad usando múltiples factores
-    const timestamp = Date.now();
-    const randomFactor = Math.random();
+    // Estrategia mejorada: 
+    // 1. Preferir esquinas y bordes en primeras jugadas (menor número de celdas adyacentes)
+    // 2. Evitar repetir celdas ya seleccionadas recientemente
     
-    const filaAleatoria = Math.floor(randomFactor * filas);
-    const columnaAleatoria = Math.floor((timestamp % 1000) / 1000 * columnas);
+    // Reiniciar historial si se cambia el tamaño del tablero
+    if (historialSeleccionesAleatorias.length > 0) {
+        const primeraSeleccion = historialSeleccionesAleatorias[0].split(',');
+        const filaHistorial = parseInt(primeraSeleccion[0]);
+        
+        // Si la fila está fuera del rango del nuevo tablero, reiniciar historial
+        if (filaHistorial >= filas) {
+            historialSeleccionesAleatorias = [];
+        }
+    }
     
-    return { fila: filaAleatoria, columna: columnaAleatoria };
+    // Limitar el historial para no almacenar demasiadas entradas
+    if (historialSeleccionesAleatorias.length > 10) {
+        historialSeleccionesAleatorias = historialSeleccionesAleatorias.slice(-10);
+    }
+    
+    // Lista de posibles ubicaciones, priorizando esquinas y bordes
+    const ubicacionesPrioritarias = [];
+    const ubicacionesNormales = [];
+    
+    // Clasificar ubicaciones entre prioritarias (bordes/esquinas) y normales
+    for (let i = 0; i < filas; i++) {
+        for (let j = 0; j < columnas; j++) {
+            // Crear clave para la celda
+            const clave = `${i},${j}`;
+            
+            // Si ya está en el historial, saltarla
+            if (historialSeleccionesAleatorias.includes(clave)) {
+                continue;
+            }
+            
+            // Es esquina
+            const esEsquina = (i === 0 || i === filas - 1) && (j === 0 || j === columnas - 1);
+            // Es borde
+            const esBorde = i === 0 || i === filas - 1 || j === 0 || j === columnas - 1;
+            
+            if (esEsquina) {
+                ubicacionesPrioritarias.unshift({ fila: i, columna: j }); // Añadir al principio (mayor prioridad)
+            } else if (esBorde) {
+                ubicacionesPrioritarias.push({ fila: i, columna: j }); // Añadir al final
+            } else {
+                ubicacionesNormales.push({ fila: i, columna: j });
+            }
+        }
+    }
+    
+    // Combinar ambas listas, con prioritarias primero
+    const todasLasUbicaciones = [...ubicacionesPrioritarias, ...ubicacionesNormales];
+    
+    // Si no hay ubicaciones disponibles (raro), reiniciar historial y volver a intentar
+    if (todasLasUbicaciones.length === 0) {
+        historialSeleccionesAleatorias = [];
+        return seleccionarPrimeraCeldaSegura(tamañoTablero);
+    }
+    
+    // Seleccionar una posición con algo de aleatoriedad
+    // Más probable elegir al principio, pero no garantizado
+    const factorAleatorio = Math.random();
+    // Índice más probable cerca del inicio pero con algo de variabilidad
+    const indice = Math.min(
+        Math.floor(factorAleatorio * factorAleatorio * todasLasUbicaciones.length),
+        todasLasUbicaciones.length - 1
+    );
+    
+    const seleccion = todasLasUbicaciones[indice];
+    
+    // Añadir al historial
+    historialSeleccionesAleatorias.push(`${seleccion.fila},${seleccion.columna}`);
+    
+    return seleccion;
 };
 
 /**
- * Analizar el tablero para tomar decisiones estratégicas
- * Versión avanzada con análisis global del tablero
+ * Crear un modelo completo del tablero con toda la información disponible
+ * @param {Array} tablero - Estado actual del tablero
+ * @param {object} tamañoTablero - Dimensiones del tablero
+ * @param {Array} celdasDescubiertas - Celdas ya descubiertas
+ * @param {Array} banderas - Banderas colocadas
+ * @returns {object} - Modelo completo del tablero
+ */
+const crearModeloTablero = (tablero, tamañoTablero, celdasDescubiertas, banderas) => {
+    const { filas, columnas } = tamañoTablero;
+    
+    // Crear matriz de estado para todas las celdas
+    const estadoCeldas = Array(filas).fill().map(() => 
+        Array(columnas).fill().map(() => ({
+            descubierta: false,
+            valor: null,
+            tieneBandera: false,
+            esSegura: false,
+            probabilidadMina: 0.5,  // Valor inicial neutral
+            restricciones: []       // Qué celdas numéricas afectan a esta celda
+        }))
+    );
+    
+    // Actualizar con celdas descubiertas
+    celdasDescubiertas.forEach(celda => {
+        const { fila, columna } = celda;
+        if (fila >= 0 && fila < filas && columna >= 0 && columna < columnas) {
+            estadoCeldas[fila][columna].descubierta = true;
+            estadoCeldas[fila][columna].valor = tablero[fila][columna];
+            estadoCeldas[fila][columna].probabilidadMina = 0; // Celda descubierta, probabilidad 0
+        }
+    });
+    
+    // Actualizar con banderas
+    banderas.forEach(bandera => {
+        const { fila, columna } = bandera;
+        if (fila >= 0 && fila < filas && columna >= 0 && columna < columnas) {
+            estadoCeldas[fila][columna].tieneBandera = true;
+            estadoCeldas[fila][columna].probabilidadMina = 1; // Bandera = 100% mina
+        }
+    });
+    
+    // Procesar restricciones de celdas numéricas
+    const restricciones = [];
+    
+    celdasDescubiertas.forEach(celda => {
+        const { fila, columna } = celda;
+        const valor = tablero[fila][columna];
+        
+        // Solo procesar celdas con números
+        if (valor !== null && valor !== undefined && !isNaN(valor) && valor !== '' && valor !== 'M') {
+            const numeroMinas = parseInt(valor);
+            
+            // Obtener celdas adyacentes
+            const adyacentes = obtenerCeldasAdyacentes(fila, columna, tamañoTablero);
+            
+            // Filtrar celdas relevantes (no descubiertas o con bandera)
+            const celdasRelevantes = adyacentes.filter(adj => 
+                !celdasDescubiertas.some(desc => 
+                    desc.fila === adj.fila && desc.columna === adj.columna
+                ) || banderas.some(band => 
+                    band.fila === adj.fila && band.columna === adj.columna
+                )
+            );
+            
+            // Contar banderas ya colocadas
+            const banderasColocadas = celdasRelevantes.filter(adj => 
+                banderas.some(band => band.fila === adj.fila && band.columna === adj.columna)
+            ).length;
+            
+            // Añadir restricción
+            const restriccion = {
+                celda: { fila, columna },
+                valor: numeroMinas,
+                celdasAfectadas: celdasRelevantes.map(c => ({ fila: c.fila, columna: c.columna })),
+                banderasColocadas,
+                minasFaltantes: numeroMinas - banderasColocadas
+            };
+            
+            restricciones.push(restriccion);
+            
+            // Actualizar celdas afectadas por esta restricción
+            celdasRelevantes.forEach(adj => {
+                if (adj.fila >= 0 && adj.fila < filas && adj.columna >= 0 && adj.columna < columnas) {
+                    estadoCeldas[adj.fila][adj.columna].restricciones.push({
+                        origen: { fila, columna },
+                        valor: numeroMinas,
+                        banderasColocadas,
+                        minasFaltantes: numeroMinas - banderasColocadas
+                    });
+                }
+            });
+        }
+    });
+    
+    return {
+        estadoCeldas,
+        restricciones,
+        tamañoTablero,
+        celdasDescubiertas: celdasDescubiertas.map(c => ({ ...c })),
+        banderas: banderas.map(b => ({ ...b }))
+    };
+};
+
+/**
+ * Identifica todas las banderas que se pueden colocar con certeza
+ * @param {object} modeloTablero - Modelo completo del tablero
+ * @returns {Array} - Lista de nuevas banderas a colocar
+ */
+const identificarTodasLasBanderas = (modeloTablero) => {
+    const { restricciones, estadoCeldas, banderas } = modeloTablero;
+    const nuevasBanderas = [];
+    
+    // 1. ANÁLISIS SIMPLE: Si una restricción tiene exactamente tantas celdas sin descubrir
+    // como minas faltantes, todas esas celdas son minas
+    restricciones.forEach(restriccion => {
+        const { celda, valor, celdasAfectadas, banderasColocadas } = restriccion;
+        const minasFaltantes = valor - banderasColocadas;
+        
+        // Filtrar celdas sin descubrir y sin bandera
+        const celdasSinDescubrirSinBandera = celdasAfectadas.filter(c => 
+            !estadoCeldas[c.fila][c.columna].descubierta && 
+            !estadoCeldas[c.fila][c.columna].tieneBandera &&
+            !banderas.some(b => b.fila === c.fila && b.columna === c.columna) &&
+            !nuevasBanderas.some(b => b.fila === c.fila && b.columna === c.columna)
+        );
+        
+        // Si el número de celdas sin descubrir es igual a las minas faltantes,
+        // todas son minas (y podemos colocar banderas)
+        if (celdasSinDescubrirSinBandera.length === minasFaltantes && minasFaltantes > 0) {
+            celdasSinDescubrirSinBandera.forEach(c => {
+                if (!nuevasBanderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
+                    nuevasBanderas.push({
+                        fila: c.fila,
+                        columna: c.columna,
+                        origen: 'análisis simple',
+                        celdaOrigen: celda
+                    });
+                    // Actualizar modelo
+                    estadoCeldas[c.fila][c.columna].tieneBandera = true;
+                    estadoCeldas[c.fila][c.columna].probabilidadMina = 1;
+                }
+            });
+        }
+    });
+    
+    // 2. ANÁLISIS DE SUBCONJUNTOS
+    // Buscar casos donde una restricción es subconjunto de otra
+    const nuevasBanderasSubconjuntos = analizarSubconjuntos(modeloTablero, nuevasBanderas);
+    nuevasBanderasSubconjuntos.forEach(bandera => {
+        if (!nuevasBanderas.some(b => b.fila === bandera.fila && b.columna === bandera.columna)) {
+            nuevasBanderas.push(bandera);
+            // Actualizar modelo
+            estadoCeldas[bandera.fila][bandera.columna].tieneBandera = true;
+            estadoCeldas[bandera.fila][bandera.columna].probabilidadMina = 1;
+        }
+    });
+    
+    // 3. ANÁLISIS DE PATRONES ESPECÍFICOS
+    // Buscar patrones como 1-2-1, etc.
+    const nuevasBanderasPatrones = detectarPatronesParaBanderas(modeloTablero, nuevasBanderas);
+    nuevasBanderasPatrones.forEach(bandera => {
+        if (!nuevasBanderas.some(b => b.fila === bandera.fila && b.columna === bandera.columna)) {
+            nuevasBanderas.push(bandera);
+            // Actualizar modelo
+            estadoCeldas[bandera.fila][bandera.columna].tieneBandera = true;
+            estadoCeldas[bandera.fila][bandera.columna].probabilidadMina = 1;
+        }
+    });
+    
+    return nuevasBanderas;
+};
+
+/**
+ * Encuentra celdas seguras con 100% de certeza
+ * @param {object} modeloTablero - Modelo completo del tablero
+ * @returns {Array} - Lista de celdas seguras
+ */
+const identificarCeldasSeguras = (modeloTablero) => {
+    const { restricciones, estadoCeldas, tamañoTablero, banderas } = modeloTablero;
+    const celdasSeguras = [];
+    
+    // 1. ANÁLISIS SIMPLE: Si una restricción tiene todas sus minas identificadas,
+    // el resto de celdas adyacentes son seguras
+    restricciones.forEach(restriccion => {
+        const { celda, valor, celdasAfectadas, banderasColocadas } = restriccion;
+        
+        // Si el número de banderas es igual al valor, todas las demás celdas son seguras
+        if (valor === banderasColocadas) {
+            // Filtrar celdas sin descubrir y sin bandera
+            const celdasSinDescubrirSinBandera = celdasAfectadas.filter(c => 
+                !estadoCeldas[c.fila][c.columna].descubierta && 
+                !estadoCeldas[c.fila][c.columna].tieneBandera &&
+                !banderas.some(b => b.fila === c.fila && b.columna === c.columna)
+            );
+            
+            // Marcar estas celdas como seguras
+            celdasSinDescubrirSinBandera.forEach(c => {
+                if (!celdasSeguras.some(s => s.fila === c.fila && s.columna === c.columna)) {
+                    celdasSeguras.push({
+                        fila: c.fila,
+                        columna: c.columna,
+                        origen: 'análisis simple',
+                        celdaOrigen: celda
+                    });
+                    // Actualizar modelo
+                    estadoCeldas[c.fila][c.columna].esSegura = true;
+                    estadoCeldas[c.fila][c.columna].probabilidadMina = 0;
+                }
+            });
+        }
+    });
+    
+    // 2. ANÁLISIS DE SUBCONJUNTOS
+    // Buscar casos donde podemos deducir celdas seguras por diferencia de conjuntos
+    const celdasSegurasSubconjuntos = analizarSubconjuntosParaSeguras(modeloTablero);
+    celdasSegurasSubconjuntos.forEach(segura => {
+        if (!celdasSeguras.some(s => s.fila === segura.fila && s.columna === segura.columna)) {
+            celdasSeguras.push(segura);
+            // Actualizar modelo
+            estadoCeldas[segura.fila][segura.columna].esSegura = true;
+            estadoCeldas[segura.fila][segura.columna].probabilidadMina = 0;
+        }
+    });
+    
+    // 3. ANÁLISIS DE PATRONES ESPECÍFICOS
+    // Buscar patrones como 1-2-1, etc. que revelen celdas seguras
+    const celdasSegurasPatrones = detectarPatronesParaSeguras(modeloTablero);
+    celdasSegurasPatrones.forEach(segura => {
+        if (!celdasSeguras.some(s => s.fila === segura.fila && s.columna === segura.columna)) {
+            celdasSeguras.push(segura);
+            // Actualizar modelo
+            estadoCeldas[segura.fila][segura.columna].esSegura = true;
+            estadoCeldas[segura.fila][segura.columna].probabilidadMina = 0;
+        }
+    });
+    
+    return celdasSeguras;
+};
+
+/**
+ * Calcula probabilidades de mina para todas las celdas sin descubrir
+ * @param {object} modeloTablero - Modelo completo del tablero
+ * @returns {object} - Mapa de probabilidades para cada celda
+ */
+const calcularProbabilidadesGlobales = (modeloTablero) => {
+    const { estadoCeldas, restricciones, tamañoTablero } = modeloTablero;
+    const { filas, columnas } = tamañoTablero;
+    const mapaProbabilidades = {};
+    
+    // 1. Inicializar mapa con probabilidad base para todas las celdas no descubiertas
+    for (let i = 0; i < filas; i++) {
+        for (let j = 0; j < columnas; j++) {
+            // Clave única para cada celda
+            const clave = `${i},${j}`;
+            
+            // Si la celda ya está descubierta o tiene bandera, no necesitamos calcular probabilidad
+            if (estadoCeldas[i][j].descubierta || estadoCeldas[i][j].tieneBandera) {
+                continue;
+            }
+            
+            // Probabilidad base conservadora
+            mapaProbabilidades[clave] = {
+                probabilidad: 0.15, // Valor conservador por defecto
+                certeza: false,
+                origen: 'valor base'
+            };
+        }
+    }
+    
+    // 2. Actualizar probabilidades según restricciones locales
+    restricciones.forEach(restriccion => {
+        const { celdasAfectadas, minasFaltantes } = restriccion;
+        
+        // Solo calcular si hay celdas afectadas y minas faltantes
+        if (celdasAfectadas.length > 0 && minasFaltantes > 0) {
+            // Filtrar celdas sin descubrir y sin bandera
+            const celdasRelevantes = celdasAfectadas.filter(c => 
+                !estadoCeldas[c.fila][c.columna].descubierta && 
+                !estadoCeldas[c.fila][c.columna].tieneBandera
+            );
+            
+            // Si no hay celdas relevantes, saltamos
+            if (celdasRelevantes.length === 0) return;
+            
+            // Calcular probabilidad para esta restricción
+            const probabilidadRestricccion = minasFaltantes / celdasRelevantes.length;
+            
+            // Actualizar mapa de probabilidades
+            celdasRelevantes.forEach(c => {
+                const clave = `${c.fila},${c.columna}`;
+                
+                // Si la celda ya tiene una probabilidad asignada, tomamos la más alta
+                // (enfoque conservador = más peligroso)
+                if (!mapaProbabilidades[clave] || mapaProbabilidades[clave].probabilidad < probabilidadRestricccion) {
+                    mapaProbabilidades[clave] = {
+                        probabilidad: probabilidadRestricccion,
+                        certeza: false,
+                        origen: `restricción de celda (${restriccion.celda.fila+1},${restriccion.celda.columna+1})`
+                    };
+                }
+            });
+        }
+    });
+    
+    // 3. Reducir probabilidades para celdas aisladas (lejos de números)
+    reducirProbabilidadesCeldasAisladas(modeloTablero, mapaProbabilidades);
+    
+    // 4. Ajustar probabilidades según patrones globales
+    ajustarProbabilidadesSegunPatrones(modeloTablero, mapaProbabilidades);
+    
+    return mapaProbabilidades;
+};
+
+/**
+ * Reduce probabilidades para celdas aisladas (lejos de números)
+ * @param {object} modeloTablero - Modelo del tablero
+ * @param {object} mapaProbabilidades - Mapa de probabilidades a actualizar
+ */
+const reducirProbabilidadesCeldasAisladas = (modeloTablero, mapaProbabilidades) => {
+    const { estadoCeldas, tamañoTablero } = modeloTablero;
+    const { filas, columnas } = tamañoTablero;
+    
+    // Identificar celdas que no están afectadas por ninguna restricción
+    for (let i = 0; i < filas; i++) {
+        for (let j = 0; j < columnas; j++) {
+            const clave = `${i},${j}`;
+            
+            // Solo procesar celdas sin descubrir y sin bandera
+            if (estadoCeldas[i][j].descubierta || estadoCeldas[i][j].tieneBandera) {
+                continue;
+            }
+            
+            // Si la celda no tiene restricciones, reducir probabilidad
+            if (estadoCeldas[i][j].restricciones.length === 0) {
+                // Reducir probabilidad para celdas aisladas
+                if (mapaProbabilidades[clave] && mapaProbabilidades[clave].probabilidad === 0.15) {
+                    mapaProbabilidades[clave].probabilidad = 0.05;
+                    mapaProbabilidades[clave].origen = 'celda aislada';
+                }
+            }
+            
+            // Calcular distancia al número más cercano
+            // Cuanto más lejos estén, menor probabilidad
+            let distanciaMinima = Number.MAX_SAFE_INTEGER;
+            
+            for (let fi = 0; fi < filas; fi++) {
+                for (let cj = 0; cj < columnas; cj++) {
+                    // Solo considerar celdas descubiertas con números
+                    if (estadoCeldas[fi][cj].descubierta && 
+                        estadoCeldas[fi][cj].valor !== null && 
+                        estadoCeldas[fi][cj].valor !== '' && 
+                        estadoCeldas[fi][cj].valor !== 'M' &&
+                        !isNaN(estadoCeldas[fi][cj].valor)) {
+                        
+                        // Calcular distancia Manhattan
+                        const distancia = Math.abs(fi - i) + Math.abs(cj - j);
+                        distanciaMinima = Math.min(distanciaMinima, distancia);
+                    }
+                }
+            }
+            
+            // Si está muy lejos de cualquier número, es muy poco probable que tenga mina
+            if (distanciaMinima > 3 && mapaProbabilidades[clave] && mapaProbabilidades[clave].probabilidad === 0.15) {
+                mapaProbabilidades[clave].probabilidad = 0.02;
+                mapaProbabilidades[clave].origen = 'celda muy alejada';
+            }
+        }
+    }
+};
+
+/**
+ * Ajusta probabilidades según patrones globales en el tablero
+ * @param {object} modeloTablero - Modelo del tablero
+ * @param {object} mapaProbabilidades - Mapa de probabilidades a actualizar
+ */
+const ajustarProbabilidadesSegunPatrones = (modeloTablero, mapaProbabilidades) => {
+    const { estadoCeldas } = modeloTablero;
+    
+    // Para futuras mejoras: implementar análisis más avanzados de patrones globales
+    // Por ahora, usamos el análisis básico ya implementado
+};
+
+/**
+ * Determina la mejor jugada basada en análisis global
+ * @param {object} modeloTablero - Modelo del tablero
+ * @param {object} mapaProbabilidades - Mapa de probabilidades
+ * @param {Array} celdasSeguras - Celdas identificadas como seguras
+ * @param {Array} historialMovimientos - Historial de movimientos previos
+ * @returns {object} - Mejor celda para seleccionar
+ */
+const determinarMejorJugada = (modeloTablero, mapaProbabilidades, celdasSeguras, historialMovimientos) => {
+    // 1. PRIORIDAD MÁXIMA: Seleccionar celdas 100% seguras
+    if (celdasSeguras.length > 0) {
+        // Elegir una celda segura aleatoriamente para variabilidad
+        const indiceAleatorio = Math.floor(Math.random() * celdasSeguras.length);
+        return {
+            fila: celdasSeguras[indiceAleatorio].fila,
+            columna: celdasSeguras[indiceAleatorio].columna,
+            tipoAnalisis: 'celda 100% segura',
+            origen: celdasSeguras[indiceAleatorio].origen
+        };
+    }
+    
+    // 2. Convertir mapa de probabilidades a lista de celdas
+    const celdasConProbabilidad = [];
+    
+    Object.entries(mapaProbabilidades).forEach(([clave, info]) => {
+        const [fila, columna] = clave.split(',').map(Number);
+        
+        celdasConProbabilidad.push({
+            fila,
+            columna,
+            probabilidad: info.probabilidad,
+            origen: info.origen
+        });
+    });
+    
+    // 3. PRIORIDAD MEDIA: Seleccionar celdas con menor probabilidad de mina
+    // Ordenar por probabilidad ascendente (menor probabilidad primero)
+    celdasConProbabilidad.sort((a, b) => a.probabilidad - b.probabilidad);
+    
+    // 4. Filtrar para evitar repetir celdas recientes
+    // Obtener últimas N celdas seleccionadas para evitar repetirlas
+    const ultimasSelecciones = historialMovimientos
+        .filter(mov => !mov.esAccion) // Solo considerar selecciones, no colocación de banderas
+        .slice(-5) // Últimas 5 selecciones
+        .map(mov => ({ fila: mov.fila, columna: mov.columna }));
+    
+    // Filtrar celdas que no estén en últimas selecciones
+    const celdasNoRepetidas = celdasConProbabilidad.filter(c => 
+        !ultimasSelecciones.some(s => s.fila === c.fila && s.columna === c.columna)
+    );
+    
+    // Si hay celdas no repetidas con probabilidad mínima, usar esas
+    if (celdasNoRepetidas.length > 0 && 
+        celdasNoRepetidas[0].probabilidad <= celdasConProbabilidad[0].probabilidad + 0.1) {
+        
+        // Tomar la celda con menor probabilidad entre las no repetidas
+        return {
+            fila: celdasNoRepetidas[0].fila,
+            columna: celdasNoRepetidas[0].columna,
+            tipoAnalisis: `probabilidad ${Math.round(celdasNoRepetidas[0].probabilidad * 100)}%`,
+            origen: celdasNoRepetidas[0].origen
+        };
+    }
+    
+    // Si todas las celdas disponibles ya fueron seleccionadas recientemente
+    // o las no repetidas tienen probabilidad mucho mayor, usar la de menor probabilidad
+    return {
+        fila: celdasConProbabilidad[0].fila,
+        columna: celdasConProbabilidad[0].columna,
+        tipoAnalisis: `probabilidad ${Math.round(celdasConProbabilidad[0].probabilidad * 100)}%`,
+        origen: celdasConProbabilidad[0].origen
+    };
+};
+
+/**
+ * Analizar el tablero para tomar decisiones estratégicas (versión mejorada)
  * @param {object} parametros - Parámetros del análisis
  * @returns {object} - Decisiones del análisis
  */
@@ -102,72 +631,58 @@ export const analizarTablero = ({
     }
     
     try {
-        // 1. ANÁLISIS LOCAL BÁSICO
-        // Buscar celdas para colocar banderas (minas 100% confirmadas)
-        const nuevasBanderas = buscarCeldasParaBanderas(tablero, tamañoTablero, celdasDescubiertas, banderas);
+        // 1. CREAR MODELO COMPLETO DEL TABLERO
+        const modeloTablero = crearModeloTablero(tablero, tamañoTablero, celdasDescubiertas, banderas);
         
-        // 2. ANÁLISIS GLOBAL DEL TABLERO
-        // Buscar banderas y celdas seguras adicionales mediante análisis avanzado
-        const resultadoAnalisisGlobal = realizarAnalisisGlobal(tablero, tamañoTablero, celdasDescubiertas, [...banderas, ...nuevasBanderas]);
+        // 2. IDENTIFICAR TODAS LAS BANDERAS NUEVAS
+        const nuevasBanderas = identificarTodasLasBanderas(modeloTablero);
         
-        // Combinar resultados del análisis global (sin duplicados)
-        const todasLasBanderas = [...nuevasBanderas];
+        // 3. IDENTIFICAR CELDAS 100% SEGURAS
+        const celdasSeguras = identificarCeldasSeguras(modeloTablero);
         
-        // Añadir banderas del análisis global
-        resultadoAnalisisGlobal.banderasEncontradas.forEach(bandera => {
-            if (!todasLasBanderas.some(b => b.fila === bandera.fila && b.columna === bandera.columna) &&
-                !banderas.some(b => b.fila === bandera.fila && b.columna === bandera.columna)) {
-                todasLasBanderas.push(bandera);
-            }
-        });
+        // 4. CALCULAR PROBABILIDADES PARA TODAS LAS CELDAS
+        const mapaProbabilidades = calcularProbabilidadesGlobales(modeloTablero);
         
-        // 3. DETERMINAR SIGUIENTE JUGADA
-        let siguienteCelda = null;
+        // 5. DETERMINAR LA MEJOR JUGADA
+        const siguienteCelda = determinarMejorJugada(
+            modeloTablero, 
+            mapaProbabilidades, 
+            celdasSeguras, 
+            historialMovimientos
+        );
         
-        // Primera prioridad: Celdas seguras encontradas por el análisis global
-        if (resultadoAnalisisGlobal.celdasSeguras.length > 0) {
-            const indiceAleatorio = Math.floor(Math.random() * resultadoAnalisisGlobal.celdasSeguras.length);
-            siguienteCelda = resultadoAnalisisGlobal.celdasSeguras[indiceAleatorio];
-            
-            if (setMensajeSistema) {
-                setMensajeSistema(`Análisis global: He encontrado una celda segura en (${siguienteCelda.fila + 1},${siguienteCelda.columna + 1}).`);
-            }
-        } 
-        // Segunda prioridad: Análisis de riesgo y probabilidades
-        else {
-            siguienteCelda = encontrarMejorJugada(tablero, tamañoTablero, celdasDescubiertas, 
-                [...banderas, ...todasLasBanderas], resultadoAnalisisGlobal);
-        }
-        
-        // 4. GENERAR MOVIMIENTOS PARA NUEVAS BANDERAS
-        const movimientosGenerados = todasLasBanderas.map(bandera => ({
+        // 6. GENERAR MOVIMIENTOS PARA NUEVAS BANDERAS
+        const movimientosGenerados = nuevasBanderas.map(bandera => ({
             fila: bandera.fila,
             columna: bandera.columna,
             esAccion: true,
-            accion: "bandera"
+            accion: "bandera",
+            origen: bandera.origen
         }));
         
+        // 7. ACTUALIZAR MENSAJES DEL SISTEMA
         // Si hay banderas nuevas, actualizar mensaje
-        if (todasLasBanderas.length > 0 && setMensajeSistema) {
-            setMensajeSistema(`He identificado ${todasLasBanderas.length} mina${todasLasBanderas.length > 1 ? 's' : ''} con certeza y las he marcado con banderas.`);
+        if (nuevasBanderas.length > 0 && setMensajeSistema) {
+            setMensajeSistema(`He identificado ${nuevasBanderas.length} mina${nuevasBanderas.length > 1 ? 's' : ''} con certeza y las he marcado con banderas.`);
             if (setAnimacion) setAnimacion('bandera');
         }
         
         // Si hay siguiente celda, actualizar mensaje
-        if (siguienteCelda && setMensajeSistema && !todasLasBanderas.length) {
-            const origen = siguienteCelda.tipoAnalisis ? `(${siguienteCelda.tipoAnalisis})` : '';
-            const mensaje = `Seleccionando la casilla (${siguienteCelda.fila + 1},${siguienteCelda.columna + 1}) ${origen}`;
+        if (siguienteCelda && setMensajeSistema && !nuevasBanderas.length) {
+            const tipoAnalisis = siguienteCelda.tipoAnalisis || '';
+            const mensaje = `Seleccionando la casilla (${siguienteCelda.fila + 1},${siguienteCelda.columna + 1}) - ${tipoAnalisis}`;
             setMensajeSistema(mensaje);
         }
         
         return {
-            banderas: [...banderas, ...todasLasBanderas],
+            banderas: [...banderas, ...nuevasBanderas],
             siguienteCelda,
-            movimientosGenerados
+            movimientosGenerados,
+            mapaProbabilidades
         };
     } catch (error) {
         console.error("Error al analizar tablero:", error);
-        // En caso de error, devolver estado actual sin cambios
+        // En caso de error, seleccionar una celda aleatoria para no bloquear el juego
         return {
             banderas: banderas || [],
             siguienteCelda: seleccionarCeldaAleatoria(tablero, tamañoTablero, celdasDescubiertas, banderas),
@@ -177,981 +692,12 @@ export const analizarTablero = ({
 };
 
 /**
- * Buscar celdas donde colocar banderas (100% certeza de mina)
- * @private
- */
-const buscarCeldasParaBanderas = (tablero, tamañoTablero, celdasDescubiertas, banderas) => {
-    const nuevasBanderas = [];
-    
-    // Validar parámetros
-    if (!tablero || !tamañoTablero || !celdasDescubiertas || !banderas) {
-        return nuevasBanderas;
-    }
-    
-    // Recorrer celdas con números
-    celdasDescubiertas.forEach(celda => {
-        const { fila, columna } = celda;
-        
-        // Validar que la celda tiene coordenadas válidas
-        if (fila === undefined || columna === undefined || 
-            fila < 0 || columna < 0 ||
-            fila >= tablero.length || columna >= tablero[0].length) {
-            return;
-        }
-        
-        const valor = tablero[fila][columna];
-        
-        // Solo procesar celdas con números > 0
-        if (!valor || isNaN(valor) || valor === '0' || valor === '') {
-            return;
-        }
-        
-        const numeroMinas = parseInt(valor);
-        
-        // Si no hay minas, no hay banderas que colocar
-        if (numeroMinas <= 0) {
-            return;
-        }
-        
-        // Obtener celdas adyacentes
-        const celdasAdyacentes = obtenerCeldasAdyacentes(fila, columna, tamañoTablero);
-        
-        // Contar banderas ya colocadas
-        const banderasAdyacentes = celdasAdyacentes.filter(c => 
-            banderas.some(b => b.fila === c.fila && b.columna === c.columna) ||
-            nuevasBanderas.some(b => b.fila === c.fila && b.columna === c.columna)
-        );
-        
-        // Celdas sin descubrir y sin bandera
-        const celdasSinDescubrir = celdasAdyacentes.filter(c => 
-            !celdasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna) &&
-            !banderas.some(b => b.fila === c.fila && b.columna === c.columna) &&
-            !nuevasBanderas.some(b => b.fila === c.fila && b.columna === c.columna)
-        );
-        
-        // Si faltan minas y son exactamente las celdas sin descubrir, colocar banderas
-        if (numeroMinas - banderasAdyacentes.length === celdasSinDescubrir.length && 
-            celdasSinDescubrir.length > 0) {
-            // Todas las celdas sin descubrir tienen minas
-            celdasSinDescubrir.forEach(c => {
-                if (!nuevasBanderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
-                    nuevasBanderas.push(c);
-                }
-            });
-        }
-    });
-    
-    return nuevasBanderas;
-};
-
-/**
- * Realizar un análisis global del tablero para detectar situaciones que no pueden
- * resolverse mediante análisis local simple.
- * 
- * Implementa técnicas avanzadas como:
- * 1. Análisis de subconjuntos
- * 2. Identificación de patrones comunes (1-2-1, etc.)
- * 3. Cálculo de restricciones
- * 4. Resolver sistemas de ecuaciones lineales para determinar minas
- * 
+ * Seleccionar una celda aleatoria entre las disponibles, evitando repeticiones
  * @param {Array} tablero - Estado actual del tablero
- * @param {object} tamañoTablero - Tamaño del tablero
+ * @param {object} tamañoTablero - Dimensiones del tablero
  * @param {Array} celdasDescubiertas - Celdas ya descubiertas
- * @param {Array} banderas - Banderas colocadas (incluyendo nuevas)
- * @returns {object} - Resultado del análisis global
- */
-const realizarAnalisisGlobal = (tablero, tamañoTablero, celdasDescubiertas, banderas) => {
-    // Filtrar solo celdas numéricas (las que tienen valores 1-8)
-    const celdasNumericas = celdasDescubiertas.filter(celda => {
-        const valor = tablero[celda.fila][celda.columna];
-        return valor && !isNaN(valor) && parseInt(valor) > 0;
-    });
-    
-    // Preparar estructuras para los resultados
-    const banderasEncontradas = [];   // Celdas que definitivamente tienen minas
-    const celdasSeguras = [];         // Celdas que definitivamente NO tienen minas
-    const celdasAmbiguas = [];        // Celdas donde no podemos determinar con certeza
-    
-    // 1. CONSTRUIR SISTEMAS DE RESTRICCIONES
-    
-    // Cada restricción es un conjunto de celdas y un número (cuántas minas debe contener)
-    const restricciones = [];
-    
-    // Para cada celda numérica, crear una restricción
-    celdasNumericas.forEach(celda => {
-        const { fila, columna } = celda;
-        const valor = parseInt(tablero[fila][columna]);
-        
-        // Obtener celdas adyacentes sin descubrir
-        const adyacentes = obtenerCeldasAdyacentes(fila, columna, tamañoTablero);
-        const celdasRelevantes = adyacentes.filter(c => 
-            !celdasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna)
-        );
-        
-        // Contar banderas ya colocadas
-        const banderasColocadas = celdasRelevantes.filter(c => 
-            banderas.some(b => b.fila === c.fila && b.columna === c.columna)
-        );
-        
-        // Obtener celdas sin bandera (donde podrían estar las minas restantes)
-        const celdasSinBandera = celdasRelevantes.filter(c => 
-            !banderas.some(b => b.fila === c.fila && b.columna === c.columna)
-        );
-        
-        // Si aún faltan minas por colocar y hay celdas sin bandera
-        if (valor - banderasColocadas.length > 0 && celdasSinBandera.length > 0) {
-            restricciones.push({
-                celdas: celdasSinBandera,
-                minasFaltantes: valor - banderasColocadas.length,
-                celdaOrigen: { fila, columna, valor }
-            });
-        }
-    });
-    
-    // 2. ANÁLISIS DE SUBCONJUNTOS
-    // Buscar patrones donde una restricción es subconjunto de otra
-    for (let i = 0; i < restricciones.length; i++) {
-        const r1 = restricciones[i];
-        
-        for (let j = 0; j < restricciones.length; j++) {
-            if (i === j) continue;
-            
-            const r2 = restricciones[j];
-            
-            // Verificar si todas las celdas de r1 están contenidas en r2
-            const r1EsSubconjuntoDeR2 = esSubconjunto(r1.celdas, r2.celdas);
-            
-            if (r1EsSubconjuntoDeR2) {
-                // Si r1 es subconjunto de r2, podemos hacer "resta de conjuntos"
-                const celdasDiferencia = r2.celdas.filter(c2 => 
-                    !r1.celdas.some(c1 => c1.fila === c2.fila && c1.columna === c2.columna)
-                );
-                
-                const minasDiferencia = r2.minasFaltantes - r1.minasFaltantes;
-                
-                // Si todas las minas de la diferencia están en las celdas de la diferencia
-                if (celdasDiferencia.length === minasDiferencia && minasDiferencia > 0) {
-                    // Todas las celdas de la diferencia tienen minas
-                    celdasDiferencia.forEach(c => {
-                        if (!banderasEncontradas.some(b => b.fila === c.fila && b.columna === c.columna) &&
-                            !banderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
-                            banderasEncontradas.push({
-                                fila: c.fila,
-                                columna: c.columna,
-                                origen: 'subconjunto'
-                            });
-                        }
-                    });
-                }
-                
-                // Si no hay minas en la diferencia, todas esas celdas son seguras
-                if (minasDiferencia === 0 && celdasDiferencia.length > 0) {
-                    celdasDiferencia.forEach(c => {
-                        if (!celdasSeguras.some(s => s.fila === c.fila && s.columna === c.columna)) {
-                            celdasSeguras.push({
-                                fila: c.fila,
-                                columna: c.columna,
-                                tipoAnalisis: 'análisis de subconjuntos'
-                            });
-                        }
-                    });
-                }
-            }
-        }
-    }
-    
-    // 3. ANÁLISIS DE PATRONES COMUNES
-    
-    // Detectar patrones 1-2-1 (y variantes)
-    detectarPatron121(tablero, tamañoTablero, celdasDescubiertas, banderas, banderasEncontradas, celdasSeguras);
-    
-    // 4. ANÁLISIS DE CONTADORES Y GRUPOS
-    
-    // Buscar celdas que forman un grupo cerrado de restricciones
-    const gruposCerrados = identificarGruposCerrados(restricciones, tamañoTablero);
-    
-    // Analizar cada grupo cerrado para encontrar celdas seguras o con minas
-    gruposCerrados.forEach(grupo => {
-        const resultadoGrupo = analizarGrupoCerrado(grupo, banderas);
-        
-        // Añadir las banderas encontradas
-        resultadoGrupo.banderasEncontradas.forEach(b => {
-            if (!banderasEncontradas.some(bf => bf.fila === b.fila && bf.columna === b.columna) &&
-                !banderas.some(bf => bf.fila === b.fila && bf.columna === b.columna)) {
-                banderasEncontradas.push({
-                    fila: b.fila,
-                    columna: b.columna,
-                    origen: 'grupo cerrado'
-                });
-            }
-        });
-        
-        // Añadir las celdas seguras
-        resultadoGrupo.celdasSeguras.forEach(s => {
-            if (!celdasSeguras.some(cs => cs.fila === s.fila && cs.columna === s.columna)) {
-                celdasSeguras.push({
-                    fila: s.fila,
-                    columna: s.columna,
-                    tipoAnalisis: 'análisis de grupo cerrado'
-                });
-            }
-        });
-    });
-    
-    // 5. CÁLCULO DE PROBABILIDADES AVANZADO
-    
-    // Después de todos los análisis determinísticos, calcular probabilidades
-    const mapaProbabilidades = calcularProbabilidadesAvanzadas(
-        tablero, tamañoTablero, celdasDescubiertas, banderas, restricciones,
-        banderasEncontradas, celdasSeguras
-    );
-    
-    return {
-        banderasEncontradas,
-        celdasSeguras,
-        celdasAmbiguas,
-        mapaProbabilidades
-    };
-};
-
-/**
- * Verifica si un conjunto de celdas es subconjunto de otro
- * @param {Array} conjunto1 - Primer conjunto de celdas
- * @param {Array} conjunto2 - Segundo conjunto de celdas
- * @returns {boolean} - true si conjunto1 es subconjunto de conjunto2
- */
-const esSubconjunto = (conjunto1, conjunto2) => {
-    if (conjunto1.length > conjunto2.length) {
-        return false;
-    }
-    
-    // Verificar si cada elemento de conjunto1 está en conjunto2
-    return conjunto1.every(c1 => 
-        conjunto2.some(c2 => c1.fila === c2.fila && c1.columna === c2.columna)
-    );
-};
-
-/**
- * Detectar patrones específicos como 1-2-1 y sus variantes
- * Este patrón es común en buscaminas y permite identificar celdas seguras
- */
-const detectarPatron121 = (tablero, tamañoTablero, celdasDescubiertas, banderas, banderasEncontradas, celdasSeguras) => {
-    const { filas, columnas } = tamañoTablero;
-    
-    // Buscamos patrones horizontales y verticales
-    const direcciones = [
-        { dx: 1, dy: 0 }, // horizontal
-        { dx: 0, dy: 1 }  // vertical
-    ];
-    
-    // Buscar patrones en cada dirección
-    direcciones.forEach(({ dx, dy }) => {
-        // Recorrer todo el tablero
-        for (let i = 0; i < filas - 2 * dy; i++) {
-            for (let j = 0; j < columnas - 2 * dx; j++) {
-                // Posiciones de las tres celdas en el patrón
-                const pos1 = { fila: i, columna: j };
-                const pos2 = { fila: i + dy, columna: j + dx };
-                const pos3 = { fila: i + 2*dy, columna: j + 2*dx };
-                
-                // Verificar si las tres celdas están descubiertas
-                const celda1Descubierta = celdasDescubiertas.some(c => c.fila === pos1.fila && c.columna === pos1.columna);
-                const celda2Descubierta = celdasDescubiertas.some(c => c.fila === pos2.fila && c.columna === pos2.columna);
-                const celda3Descubierta = celdasDescubiertas.some(c => c.fila === pos3.fila && c.columna === pos3.columna);
-                
-                // Solo procesar si las tres celdas están descubiertas
-                if (celda1Descubierta && celda2Descubierta && celda3Descubierta) {
-                    const valor1 = tablero[pos1.fila][pos1.columna];
-                    const valor2 = tablero[pos2.fila][pos2.columna];
-                    const valor3 = tablero[pos3.fila][pos3.columna];
-                    
-                    // Verificar si es un patrón 1-2-1
-                    if (valor1 === '1' && valor2 === '2' && valor3 === '1') {
-                        // Buscar las celdas adyacentes al 2 que no son adyacentes a los 1
-                        const adyacentesA2 = obtenerCeldasAdyacentes(pos2.fila, pos2.columna, tamañoTablero);
-                        const adyacentesA1 = obtenerCeldasAdyacentes(pos1.fila, pos1.columna, tamañoTablero);
-                        const adyacentesA3 = obtenerCeldasAdyacentes(pos3.fila, pos3.columna, tamañoTablero);
-                        
-                        // Celdas únicas del 2
-                        const celdasUnicas = adyacentesA2.filter(c2 => 
-                            !adyacentesA1.some(c1 => c1.fila === c2.fila && c1.columna === c2.columna) &&
-                            !adyacentesA3.some(c3 => c3.fila === c2.fila && c3.columna === c2.columna)
-                        );
-                        
-                        // Si hay exactamente 2 celdas únicas, son minas
-                        if (celdasUnicas.length === 2) {
-                            // Verificar si no están descubiertas y no tienen bandera
-                            const celdasValidasParaMinas = celdasUnicas.filter(c => 
-                                !celdasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna) &&
-                                !banderas.some(b => b.fila === c.fila && b.columna === c.columna) &&
-                                !banderasEncontradas.some(b => b.fila === c.fila && b.columna === c.columna)
-                            );
-                            
-                            // Añadir como banderas
-                            celdasValidasParaMinas.forEach(c => {
-                                banderasEncontradas.push({
-                                    fila: c.fila,
-                                    columna: c.columna,
-                                    origen: 'patrón 1-2-1'
-                                });
-                            });
-                            
-                            // Celdas adyacentes a los 1 (no al 2) son seguras
-                            const celdasSegurasPosibles = [
-                                ...adyacentesA1.filter(c1 => 
-                                    !adyacentesA2.some(c2 => c1.fila === c2.fila && c1.columna === c2.columna)
-                                ),
-                                ...adyacentesA3.filter(c3 => 
-                                    !adyacentesA2.some(c2 => c3.fila === c2.fila && c3.columna === c2.columna)
-                                )
-                            ];
-                            
-                            // Eliminar duplicados y validar
-                            const celdasSegurasFiltradas = celdasSegurasPosibles.filter((c, index, self) => 
-                                index === self.findIndex(s => s.fila === c.fila && s.columna === c.columna) &&
-                                !celdasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna) &&
-                                !banderas.some(b => b.fila === c.fila && b.columna === c.columna)
-                            );
-                            
-                            // Añadir como celdas seguras
-                            celdasSegurasFiltradas.forEach(c => {
-                                if (!celdasSeguras.some(cs => cs.fila === c.fila && cs.columna === c.columna)) {
-                                    celdasSeguras.push({
-                                        fila: c.fila,
-                                        columna: c.columna,
-                                        tipoAnalisis: 'patrón 1-2-1'
-                                    });
-                                }
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    });
-};
-
-/**
- * Identificar grupos cerrados de restricciones donde un conjunto de celdas
- * solo aparece en un conjunto específico de restricciones.
- */
-const identificarGruposCerrados = (restricciones, tamañoTablero) => {
-    const gruposCerrados = [];
-    
-    // Para cada subconjunto de restricciones, verificar si forman un grupo cerrado
-    // (limitamos el tamaño a 4 para eficiencia)
-    for (let i = 0; i < restricciones.length; i++) {
-        // Considerar esta restricción como el inicio de un posible grupo
-        const grupoRestricciones = [restricciones[i]];
-        const celdasDelGrupo = new Set(restricciones[i].celdas.map(c => `${c.fila},${c.columna}`));
-        
-        // Buscar otras restricciones que compartan celdas con este grupo
-        explorarGrupoCerrado(restricciones, i, grupoRestricciones, celdasDelGrupo, 1, 4);
-        
-        // Verificar si el grupo encontrado es cerrado
-        if (grupoRestricciones.length > 1) {
-            const esCerrado = verificarGrupoCerrado(grupoRestricciones, celdasDelGrupo);
-            
-            if (esCerrado) {
-                gruposCerrados.push({
-                    restricciones: grupoRestricciones,
-                    celdas: Array.from(celdasDelGrupo).map(str => {
-                        const [fila, columna] = str.split(',').map(Number);
-                        return { fila, columna };
-                    })
-                });
-            }
-        }
-    }
-    
-    return gruposCerrados;
-};
-
-/**
- * Función recursiva para explorar posibles grupos cerrados
- * @private
- */
-const explorarGrupoCerrado = (restricciones, indiceActual, grupoRestricciones, celdasDelGrupo, profundidad, maxProfundidad) => {
-    // Limitar profundidad de recursión para evitar problemas de rendimiento
-    if (profundidad >= maxProfundidad) {
-        return;
-    }
-    
-    // Buscar restricciones que compartan celdas con el grupo actual
-    for (let j = indiceActual + 1; j < restricciones.length; j++) {
-        const restriccion = restricciones[j];
-        
-        // Verificar si esta restricción comparte alguna celda con el grupo
-        const comparteAlgunaCelda = restriccion.celdas.some(c => 
-            celdasDelGrupo.has(`${c.fila},${c.columna}`)
-        );
-        
-        if (comparteAlgunaCelda) {
-            // Añadir esta restricción al grupo
-            grupoRestricciones.push(restriccion);
-            
-            // Añadir las celdas nuevas al grupo
-            restriccion.celdas.forEach(c => {
-                celdasDelGrupo.add(`${c.fila},${c.columna}`);
-            });
-            
-            // Continuar explorando recursivamente
-            explorarGrupoCerrado(restricciones, j, grupoRestricciones, celdasDelGrupo, profundidad + 1, maxProfundidad);
-        }
-    }
-};
-
-/**
- * Verificar si un grupo de restricciones forma un grupo cerrado
- * Un grupo es cerrado si el número total de minas faltantes coincide con las restricciones
- * @private
- */
-const verificarGrupoCerrado = (grupoRestricciones, celdasDelGrupo) => {
-    // Contar el total de minas faltantes en el grupo
-    const totalMinasFaltantes = grupoRestricciones.reduce((total, r) => total + r.minasFaltantes, 0);
-    
-    // Contar el número de celdas únicas en el grupo
-    const numeroCeldas = celdasDelGrupo.size;
-    
-    // Para que sea un grupo cerrado válido, debe tener sentido matemáticamente
-    return totalMinasFaltantes <= numeroCeldas && totalMinasFaltantes > 0;
-};
-
-/**
- * Analizar un grupo cerrado de restricciones para encontrar celdas seguras o con minas
- * @private
- */
-const analizarGrupoCerrado = (grupo, banderas) => {
-    const { restricciones, celdas } = grupo;
-    
-    // Resultados del análisis
-    const banderasEncontradas = [];
-    const celdasSeguras = [];
-    
-    // Contar total de minas que deben estar en el grupo
-    const totalMinasFaltantes = restricciones.reduce((total, r) => total + r.minasFaltantes, 0);
-    
-    // Si el total de minas es 0, todas las celdas son seguras
-    if (totalMinasFaltantes === 0) {
-        celdas.forEach(c => {
-            if (!banderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
-                celdasSeguras.push(c);
-            }
-        });
-        return { banderasEncontradas, celdasSeguras };
-    }
-    
-    // Si el total de minas es igual al número de celdas, todas tienen minas
-    if (totalMinasFaltantes === celdas.length) {
-        celdas.forEach(c => {
-            if (!banderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
-                banderasEncontradas.push(c);
-            }
-        });
-        return { banderasEncontradas, celdasSeguras };
-    }
-    
-    // Para casos más complejos, realizar análisis detallado
-    // Construir un sistema de ecuaciones lineales
-    // [Este es un enfoque simplificado - para una implementación completa se requeriría
-    // un algoritmo de resolución de sistemas de ecuaciones lineales]
-    
-    // En este caso, vamos a intentar un enfoque basado en combinaciones
-    if (celdas.length <= 10) { // Limitamos a grupos pequeños por rendimiento
-        // Generar todas las posibles distribuciones de minas en el grupo
-        const posiblesCombinaciones = generarCombinacionesMinas(celdas, totalMinasFaltantes);
-        
-        // Verificar qué combinaciones son válidas según las restricciones
-        const combinacionesValidas = posiblesCombinaciones.filter(combinacion => 
-            esDistribucionValida(combinacion, restricciones)
-        );
-        
-        // Si hay combinaciones válidas, buscar celdas comunes
-        if (combinacionesValidas.length > 0) {
-            // Celdas que tienen mina en todas las combinaciones válidas
-            const celdasConMinaEnTodas = celdas.filter(celda => 
-                combinacionesValidas.every(comb => 
-                    comb.some(c => c.fila === celda.fila && c.columna === celda.columna)
-                )
-            );
-            
-            // Celdas que no tienen mina en ninguna combinación válida
-            const celdasSinMinaEnTodas = celdas.filter(celda => 
-                combinacionesValidas.every(comb => 
-                    !comb.some(c => c.fila === celda.fila && c.columna === celda.columna)
-                )
-            );
-            
-            // Añadir resultados
-            celdasConMinaEnTodas.forEach(c => {
-                if (!banderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
-                    banderasEncontradas.push(c);
-                }
-            });
-            
-            celdasSinMinaEnTodas.forEach(c => {
-                if (!banderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
-                    celdasSeguras.push(c);
-                }
-            });
-        }
-    }
-    
-    return { banderasEncontradas, celdasSeguras };
-};
-
-/**
- * Genera todas las posibles combinaciones de distribución de minas en un grupo de celdas
- * @private
- */
-const generarCombinacionesMinas = (celdas, totalMinas) => {
-    // Para grupos pequeños, generamos todas las combinaciones
-    // Esta función es una versión simplificada, para grupos grandes se requeriría
-    // un enfoque más eficiente o probabilístico
-    
-    const result = [];
-    
-    // Función recursiva para generar combinaciones
-    const generarCombinacionesRecursiva = (startIndex, currentCombination) => {
-        if (currentCombination.length === totalMinas) {
-            result.push([...currentCombination]);
-            return;
-        }
-        
-        for (let i = startIndex; i < celdas.length; i++) {
-            currentCombination.push(celdas[i]);
-            generarCombinacionesRecursiva(i + 1, currentCombination);
-            currentCombination.pop();
-        }
-    };
-    
-    generarCombinacionesRecursiva(0, []);
-    return result;
-};
-
-/**
- * Verifica si una distribución de minas satisface todas las restricciones
- * @private
- */
-const esDistribucionValida = (combinacion, restricciones) => {
-    return restricciones.every(restriccion => {
-        // Contar cuántas minas de la combinación están en las celdas de esta restricción
-        const minasEnRestriccion = combinacion.filter(celda => 
-            restriccion.celdas.some(c => c.fila === celda.fila && c.columna === celda.columna)
-        ).length;
-        
-        // La distribución es válida si el número de minas coincide con lo esperado
-        return minasEnRestriccion === restriccion.minasFaltantes;
-    });
-};
-
-/**
- * Calcular probabilidades avanzadas para todas las celdas del tablero
- * @private
- */
-const calcularProbabilidadesAvanzadas = (tablero, tamañoTablero, celdasDescubiertas, banderas, restricciones, banderasEncontradas, celdasSeguras) => {
-    const { filas, columnas } = tamañoTablero;
-    const mapaProbabilidades = {};
-    
-    // Inicializar mapa con probabilidad base para todas las celdas no descubiertas
-    for (let i = 0; i < filas; i++) {
-        for (let j = 0; j < columnas; j++) {
-            // Clave única para cada celda
-            const clave = `${i},${j}`;
-            
-            // Verificar si la celda ya está descubierta o tiene bandera
-            const estaDescubierta = celdasDescubiertas.some(c => c.fila === i && c.columna === j);
-            const tieneBandera = banderas.some(b => b.fila === i && b.columna === j) || 
-                               banderasEncontradas.some(b => b.fila === i && b.columna === j);
-            const esSegura = celdasSeguras.some(s => s.fila === i && s.columna === j);
-            
-            if (!estaDescubierta && !tieneBandera) {
-                if (esSegura) {
-                    // Celda segura identificada por análisis avanzado
-                    mapaProbabilidades[clave] = {
-                        probabilidad: 0,
-                        certeza: true,
-                        origen: 'análisis global'
-                    };
-                } else {
-                    // Probabilidad base para celdas no analizadas
-                    mapaProbabilidades[clave] = {
-                        probabilidad: 0.15, // Valor conservador por defecto
-                        certeza: false,
-                        origen: 'valor base'
-                    };
-                }
-            }
-        }
-    }
-    
-    // Identificar celdas que pertenecen a restricciones
-    const celdasEnRestricciones = new Set();
-    
-    // Para cada restricción, actualizar probabilidades
-    restricciones.forEach(restriccion => {
-        // Solo procesar restricciones con celdas y minas pendientes
-        if (restriccion.celdas.length > 0 && restriccion.minasFaltantes > 0) {
-            const probabilidad = restriccion.minasFaltantes / restriccion.celdas.length;
-            
-            restriccion.celdas.forEach(celda => {
-                const clave = `${celda.fila},${celda.columna}`;
-                celdasEnRestricciones.add(clave);
-                
-                // Si no es una celda ya identificada como segura
-                if (!celdasSeguras.some(s => s.fila === celda.fila && s.columna === celda.columna)) {
-                    // Actualizar solo si la nueva probabilidad es mayor (enfoque conservador)
-                    if (!mapaProbabilidades[clave] || mapaProbabilidades[clave].probabilidad < probabilidad) {
-                        mapaProbabilidades[clave] = {
-                            probabilidad,
-                            certeza: false,
-                            origen: `restricción de ${restriccion.celdaOrigen.fila + 1},${restriccion.celdaOrigen.columna + 1}`
-                        };
-                    }
-                }
-            });
-        }
-    });
-    
-    // Para celdas que no están en ninguna restricción, reducir su probabilidad
-    Object.keys(mapaProbabilidades).forEach(clave => {
-        if (!celdasEnRestricciones.has(clave) && mapaProbabilidades[clave].probabilidad === 0.15) {
-            mapaProbabilidades[clave].probabilidad = 0.05; // Menor probabilidad para celdas "libres"
-            mapaProbabilidades[clave].origen = 'celda libre';
-        }
-    });
-    
-    return mapaProbabilidades;
-};
-
-/**
- * Encontrar la mejor jugada (celda con menor probabilidad de contener mina)
- * Versión MEJORADA para seleccionar celdas más inteligentemente
- * @private
- */
-const encontrarMejorJugada = (tablero, tamañoTablero, celdasDescubiertas, banderas, analisisGlobal) => {
-    // Validar parámetros
-    if (!tablero || !tamañoTablero || !celdasDescubiertas || !banderas) {
-        return seleccionarCeldaAleatoria(tablero, tamañoTablero, celdasDescubiertas, banderas);
-    }
-    
-    // 1. PRIMERA PRIORIDAD: Buscar celdas seguras (0% probabilidad de mina)
-    const celdasSeguras = buscarCeldasSeguras(tablero, tamañoTablero, celdasDescubiertas, banderas);
-    
-    if (celdasSeguras.length > 0) {
-        // Elegir una celda segura aleatoriamente
-        const indiceAleatorio = Math.floor(Math.random() * celdasSeguras.length);
-        const celdaSeleccionada = celdasSeguras[indiceAleatorio];
-        celdaSeleccionada.tipoAnalisis = 'celda 100% segura';
-        return celdaSeleccionada;
-    }
-    
-    // 2. SEGUNDA PRIORIDAD: Buscar celdas alejadas de números y banderas (menor riesgo)
-    const celdasSinRiesgo = buscarCeldasSinRiesgo(tablero, tamañoTablero, celdasDescubiertas, banderas);
-    
-    if (celdasSinRiesgo.length > 0) {
-        // Elegir una de las celdas seguras alejadas de números
-        const indiceAleatorio = Math.floor(Math.random() * celdasSinRiesgo.length);
-        const celdaSeleccionada = celdasSinRiesgo[indiceAleatorio];
-        celdaSeleccionada.tipoAnalisis = 'borde seguro';
-        return celdaSeleccionada;
-    }
-    
-    // 3. TERCERA PRIORIDAD: Utilizar mapa de probabilidades del análisis global
-    if (analisisGlobal && analisisGlobal.mapaProbabilidades) {
-        const celdasConProbabilidad = [];
-        
-        // Convertir mapa de probabilidades a lista de celdas
-        Object.entries(analisisGlobal.mapaProbabilidades).forEach(([clave, info]) => {
-            const [fila, columna] = clave.split(',').map(Number);
-            
-            // Verificar que la celda está disponible
-            const estaDescubierta = celdasDescubiertas.some(c => c.fila === fila && c.columna === columna);
-            const tieneBandera = banderas.some(b => b.fila === fila && b.columna === columna);
-            
-            if (!estaDescubierta && !tieneBandera) {
-                celdasConProbabilidad.push({
-                    fila,
-                    columna,
-                    probabilidad: info.probabilidad,
-                    origen: info.origen
-                });
-            }
-        });
-        
-        // Si hay celdas con probabilidad calculada
-        if (celdasConProbabilidad.length > 0) {
-            // Ordenar por probabilidad ascendente (menor probabilidad primero)
-            celdasConProbabilidad.sort((a, b) => a.probabilidad - b.probabilidad);
-            
-            // Tomar la celda con menor probabilidad de mina
-            const celdaSeleccionada = {
-                fila: celdasConProbabilidad[0].fila,
-                columna: celdasConProbabilidad[0].columna,
-                tipoAnalisis: `probabilidad ${Math.round(celdasConProbabilidad[0].probabilidad * 100)}%`
-            };
-            
-            return celdaSeleccionada;
-        }
-    }
-    
-    // 4. CUARTA PRIORIDAD: Calcular probabilidades detalladas
-    const celdasConProbabilidad = calcularProbabilidadesDetalladas(tablero, tamañoTablero, celdasDescubiertas, banderas);
-    
-    if (celdasConProbabilidad.length > 0) {
-        // Ordenar por probabilidad ascendente (menor probabilidad primero)
-        celdasConProbabilidad.sort((a, b) => a.probabilidad - b.probabilidad);
-        // Tomar la celda con menor probabilidad de contener mina
-        const celdaSeleccionada = {
-            fila: celdasConProbabilidad[0].fila,
-            columna: celdasConProbabilidad[0].columna,
-            tipoAnalisis: `probabilidad ${Math.round(celdasConProbabilidad[0].probabilidad * 100)}%`
-        };
-        
-        return celdaSeleccionada;
-    }
-    
-    // 5. ÚLTIMO RECURSO: Si no hay análisis disponible, seleccionar celda aleatoria
-    const celdaAleatoria = seleccionarCeldaAleatoria(tablero, tamañoTablero, celdasDescubiertas, banderas);
-    
-    if (celdaAleatoria) {
-        celdaAleatoria.tipoAnalisis = 'aleatorio';
-    }
-    
-    return celdaAleatoria;
-};
-
-/**
- * Buscar celdas seguras (0% probabilidad de mina)
- * @private
- */
-const buscarCeldasSeguras = (tablero, tamañoTablero, celdasDescubiertas, banderas) => {
-    const celdasSeguras = [];
-    
-    // Validar parámetros
-    if (!tablero || !tamañoTablero || !celdasDescubiertas || !banderas) {
-        return celdasSeguras;
-    }
-    
-    // Recorrer celdas con números
-    celdasDescubiertas.forEach(celda => {
-        const { fila, columna } = celda;
-        
-        // Validar que la celda tiene coordenadas válidas
-        if (fila === undefined || columna === undefined || 
-            fila < 0 || columna < 0 ||
-            fila >= tablero.length || columna >= tablero[0].length) {
-            return;
-        }
-        
-        const valor = tablero[fila][columna];
-        
-        // Solo procesar celdas con números (incluyendo 0/vacío)
-        if (valor === undefined || (isNaN(valor) && valor !== '' && valor !== '0')) {
-            return;
-        }
-        
-        const numeroMinas = valor === '' || valor === '0' ? 0 : parseInt(valor);
-        
-        // Obtener celdas adyacentes
-        const celdasAdyacentes = obtenerCeldasAdyacentes(fila, columna, tamañoTablero);
-        
-        // Contar banderas adyacentes
-        const banderasAdyacentes = celdasAdyacentes.filter(c => 
-            banderas.some(b => b.fila === c.fila && b.columna === c.columna)
-        ).length;
-        
-        // Si el número coincide con las banderas, las demás celdas son seguras
-        if (banderasAdyacentes === numeroMinas) {
-            celdasAdyacentes.forEach(c => {
-                // No considerar celdas ya descubiertas o con bandera
-                if (celdasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna) ||
-                    banderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
-                    return;
-                }
-                
-                // Agregar a celdas seguras si no está ya
-                if (!celdasSeguras.some(s => s.fila === c.fila && s.columna === c.columna)) {
-                    celdasSeguras.push(c);
-                }
-            });
-        }
-    });
-    
-    return celdasSeguras;
-};
-
-/**
- * Buscar celdas alejadas de números y banderas (menor riesgo)
- * NUEVO método para priorizar celdas seguras que están lejos de números
- * @private
- */
-const buscarCeldasSinRiesgo = (tablero, tamañoTablero, celdasDescubiertas, banderas) => {
-    // Validar parámetros
-    if (!tablero || !tamañoTablero || !celdasDescubiertas || !banderas) {
-        return [];
-    }
-    
-    const { filas, columnas } = tamañoTablero;
-    const celdasDisponibles = [];
-    
-    // Crear un mapa de riesgo: inicializado a 0 para todas las celdas
-    // Un valor más alto = más riesgo (más números cercanos)
-    const mapaRiesgo = Array(filas).fill().map(() => Array(columnas).fill(0));
-    
-    // Para cada celda con número o bandera, aumentar el riesgo en las celdas cercanas
-    const aumentarRiesgoAlrededor = (fila, columna, valor) => {
-        // Alcance del aumento de riesgo (2 celdas de distancia es suficiente)
-        const alcance = 2;
-        
-        // Aumentar riesgo en un área cuadrada alrededor de la celda
-        for (let i = Math.max(0, fila - alcance); i <= Math.min(filas - 1, fila + alcance); i++) {
-            for (let j = Math.max(0, columna - alcance); j <= Math.min(columnas - 1, columna + alcance); j++) {
-                // Calcular distancia Manhattan
-                const distancia = Math.abs(i - fila) + Math.abs(j - columna);
-                // El riesgo disminuye con la distancia
-                if (distancia <= alcance) {
-                    // Valor + 1 para números, 2 para banderas (más riesgo)
-                    // El valor disminuye con la distancia
-                    mapaRiesgo[i][j] += valor / Math.max(1, distancia);
-                }
-            }
-        }
-    };
-    
-    // Aumentar riesgo alrededor de celdas con números
-    celdasDescubiertas.forEach(celda => {
-        const { fila, columna } = celda;
-        const valor = tablero[fila][columna];
-        
-        // Solo considerar celdas con números > 0
-        if (valor && !isNaN(valor) && parseInt(valor) > 0) {
-            aumentarRiesgoAlrededor(fila, columna, parseInt(valor));
-        }
-    });
-    
-    // Aumentar riesgo alrededor de banderas (más riesgo)
-    banderas.forEach(bandera => {
-        aumentarRiesgoAlrededor(bandera.fila, bandera.columna, 2);
-    });
-    
-    // Encontrar todas las celdas disponibles y su nivel de riesgo
-    for (let i = 0; i < filas; i++) {
-        for (let j = 0; j < columnas; j++) {
-            // Verificar si la celda está disponible
-            const estaDescubierta = celdasDescubiertas.some(c => c.fila === i && c.columna === j);
-            const tieneBandera = banderas.some(b => b.fila === i && b.columna === j);
-            
-            if (!estaDescubierta && !tieneBandera) {
-                celdasDisponibles.push({
-                    fila: i,
-                    columna: j,
-                    riesgo: mapaRiesgo[i][j]
-                });
-            }
-        }
-    }
-    
-    // Ordenar por nivel de riesgo (menor primero)
-    celdasDisponibles.sort((a, b) => a.riesgo - b.riesgo);
-    
-    // Tomar las celdas con menor riesgo (máximo 5)
-    // Solo consideramos celdas realmente de bajo riesgo (valor menor a un umbral)
-    const UMBRAL_BAJO_RIESGO = 0.5;
-    const celdasBajoRiesgo = celdasDisponibles
-        .filter(c => c.riesgo < UMBRAL_BAJO_RIESGO)
-        .slice(0, 5);
-    
-    return celdasBajoRiesgo;
-};
-
-/**
- * Calcular probabilidades detalladas para todas las celdas
- * @private
- */
-const calcularProbabilidadesDetalladas = (tablero, tamañoTablero, celdasDescubiertas, banderas) => {
-    // Validar parámetros
-    if (!tablero || !tamañoTablero || !celdasDescubiertas || !banderas) {
-        return [];
-    }
-    
-    const { filas, columnas } = tamañoTablero;
-    const celdasConProbabilidad = [];
-    
-    // Para cada celda disponible, calcular probabilidad
-    for (let i = 0; i < filas; i++) {
-        for (let j = 0; j < columnas; j++) {
-            // Verificar si la celda está disponible
-            const estaDescubierta = celdasDescubiertas.some(c => c.fila === i && c.columna === j);
-            const tieneBandera = banderas.some(b => b.fila === i && b.columna === j);
-            
-            if (!estaDescubierta && !tieneBandera) {
-                // Calcular probabilidad basada en números adyacentes
-                const probabilidad = calcularProbabilidadCelda(i, j, tablero, tamañoTablero, celdasDescubiertas, banderas);
-                
-                celdasConProbabilidad.push({
-                    fila: i,
-                    columna: j,
-                    probabilidad
-                });
-            }
-        }
-    }
-    
-    return celdasConProbabilidad;
-};
-
-/**
- * Calcular la probabilidad de que una celda contenga mina
- * @private
- */
-const calcularProbabilidadCelda = (fila, columna, tablero, tamañoTablero, celdasDescubiertas, banderas) => {
-    // Obtener celdas numéricas adyacentes a esta celda
-    const celdasAdyacentes = obtenerCeldasAdyacentes(fila, columna, tamañoTablero);
-    const celdasNumericasAdyacentes = celdasAdyacentes.filter(c => 
-        celdasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna) &&
-        tablero[c.fila][c.columna] && !isNaN(tablero[c.fila][c.columna])
-    );
-    
-    // Si no hay celdas numéricas adyacentes, usar una probabilidad baja por defecto
-    if (celdasNumericasAdyacentes.length === 0) {
-        return 0.1; // Valor bajo pero no cero
-    }
-    
-    // Calcular probabilidad basada en celdas numéricas adyacentes
-    let probabilidadMaxima = 0;
-    
-    celdasNumericasAdyacentes.forEach(celdaNumerica => {
-        const { fila: filaN, columna: columnaN } = celdaNumerica;
-        const valor = parseInt(tablero[filaN][columnaN]);
-        
-        // Obtener celdas adyacentes a la celda numérica
-        const celdasAdyacentesN = obtenerCeldasAdyacentes(filaN, columnaN, tamañoTablero);
-        
-        // Contar banderas y celdas sin descubrir
-        const banderasAdyacentes = celdasAdyacentesN.filter(c => 
-            banderas.some(b => b.fila === c.fila && b.columna === c.columna)
-        ).length;
-        
-        const celdasSinDescubrir = celdasAdyacentesN.filter(c => 
-            !celdasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna) &&
-            !banderas.some(b => b.fila === c.fila && b.columna === c.columna)
-        ).length;
-        
-        // Calcular probabilidad para esta celda numérica
-        if (celdasSinDescubrir > 0) {
-            const probabilidadLocal = (valor - banderasAdyacentes) / celdasSinDescubrir;
-            // Considerar la probabilidad más alta entre todas las celdas numéricas adyacentes
-            probabilidadMaxima = Math.max(probabilidadMaxima, probabilidadLocal);
-        }
-    });
-    
-    return probabilidadMaxima;
-};
-
-/**
- * Seleccionar una celda aleatoria entre las disponibles
- * @private
+ * @param {Array} banderas - Banderas colocadas
+ * @returns {object} - Celda seleccionada aleatoriamente
  */
 const seleccionarCeldaAleatoria = (tablero, tamañoTablero, celdasDescubiertas, banderas) => {
     // Validar parámetros
@@ -1180,19 +726,315 @@ const seleccionarCeldaAleatoria = (tablero, tamañoTablero, celdasDescubiertas, 
             // Verificar si la celda tiene bandera
             const tieneBandera = banderas.some(b => b.fila === i && b.columna === j);
             
-           // Si no está descubierta y no tiene bandera, está disponible
-           if (!estaDescubierta && !tieneBandera) {
-            celdasDisponibles.push({ fila: i, columna: j });
+            // Si no está descubierta y no tiene bandera, está disponible
+            if (!estaDescubierta && !tieneBandera) {
+                celdasDisponibles.push({ fila: i, columna: j });
+            }
         }
     }
-}
+    
+    // Si hay celdas disponibles, seleccionar una aleatoriamente
+    if (celdasDisponibles.length > 0) {
+        // Evitar seleccionar celdas en el historial reciente
+        // Para este caso simple, simplemente usamos un índice aleatorio variable
+        const indiceAleatorio = Math.floor(Math.random() * celdasDisponibles.length);
+        
+        const seleccion = celdasDisponibles[indiceAleatorio];
+        seleccion.tipoAnalisis = 'selección aleatoria';
+        return seleccion;
+    }
+    
+    // Si no hay celdas disponibles (raro), retornar null
+    return null;
+};
 
-// Si hay celdas disponibles, seleccionar una aleatoriamente
-if (celdasDisponibles.length > 0) {
-    const indiceAleatorio = Math.floor(Math.random() * celdasDisponibles.length);
-    return celdasDisponibles[indiceAleatorio];
-}
+/**
+ * Analiza subconjuntos de restricciones para identificar banderas
+ * @param {object} modeloTablero - Modelo del tablero
+ * @param {Array} banderasYaIdentificadas - Banderas ya identificadas para no duplicar
+ * @returns {Array} - Nuevas banderas descubiertas
+ */
+const analizarSubconjuntos = (modeloTablero, banderasYaIdentificadas) => {
+    const { restricciones, estadoCeldas } = modeloTablero;
+    const nuevasBanderas = [];
+    
+    // Para cada par de restricciones, buscar si una es subconjunto de otra
+    for (let i = 0; i < restricciones.length; i++) {
+        const r1 = restricciones[i];
+        
+        for (let j = 0; j < restricciones.length; j++) {
+            if (i === j) continue;
+            
+            const r2 = restricciones[j];
+            
+            // Verificar si todas las celdas de r1 están contenidas en r2
+            const r1EsSubconjuntoDeR2 = esSubconjunto(r1.celdasAfectadas, r2.celdasAfectadas);
+            
+            if (r1EsSubconjuntoDeR2) {
+                // Calcular las celdas que están en r2 pero no en r1
+                const celdasDiferencia = r2.celdasAfectadas.filter(c2 => 
+                    !r1.celdasAfectadas.some(c1 => c1.fila === c2.fila && c1.columna === c2.columna)
+                );
+                
+                // Calcular el número de minas en la diferencia
+                const minasDiferencia = r2.minasFaltantes - r1.minasFaltantes;
+                
+                // Si todas las celdas de la diferencia deben ser minas
+                if (celdasDiferencia.length === minasDiferencia && minasDiferencia > 0) {
+                    // Todas las celdas de la diferencia tienen minas
+                    celdasDiferencia.forEach(c => {
+                        // Verificar que no esté descubierta ni tenga bandera ya
+                        if (!estadoCeldas[c.fila][c.columna].descubierta && 
+                            !estadoCeldas[c.fila][c.columna].tieneBandera &&
+                            !banderasYaIdentificadas.some(b => b.fila === c.fila && b.columna === c.columna) &&
+                            !nuevasBanderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
+                            
+                            nuevasBanderas.push({
+                                fila: c.fila,
+                                columna: c.columna,
+                                origen: 'análisis de subconjuntos',
+                                celdaOrigen1: r1.celda,
+                                celdaOrigen2: r2.celda
+                            });
+                        }
+                    });
+                }
+            }
+        }
+    }
+    
+    return nuevasBanderas;
+};
 
-// Si no hay celdas disponibles (raro), retornar null
-return null;
+/**
+ * Analiza subconjuntos para identificar celdas seguras
+ * @param {object} modeloTablero - Modelo del tablero
+ * @returns {Array} - Celdas seguras identificadas
+ */
+const analizarSubconjuntosParaSeguras = (modeloTablero) => {
+    const { restricciones, estadoCeldas } = modeloTablero;
+    const celdasSeguras = [];
+    
+    // Para cada par de restricciones, buscar si una es subconjunto de otra
+    for (let i = 0; i < restricciones.length; i++) {
+        const r1 = restricciones[i];
+        
+        for (let j = 0; j < restricciones.length; j++) {
+            if (i === j) continue;
+            
+            const r2 = restricciones[j];
+            
+            // Verificar si todas las celdas de r1 están contenidas en r2
+            const r1EsSubconjuntoDeR2 = esSubconjunto(r1.celdasAfectadas, r2.celdasAfectadas);
+            
+            if (r1EsSubconjuntoDeR2) {
+                // Calcular las celdas que están en r2 pero no en r1
+                const celdasDiferencia = r2.celdasAfectadas.filter(c2 => 
+                    !r1.celdasAfectadas.some(c1 => c1.fila === c2.fila && c1.columna === c2.columna)
+                );
+                
+                // Calcular el número de minas en la diferencia
+                const minasDiferencia = r2.minasFaltantes - r1.minasFaltantes;
+                
+                // Si no hay minas en la diferencia, todas esas celdas son seguras
+                if (minasDiferencia === 0 && celdasDiferencia.length > 0) {
+                    celdasDiferencia.forEach(c => {
+                        // Verificar que no esté descubierta ni tenga bandera ya
+                        if (!estadoCeldas[c.fila][c.columna].descubierta && 
+                            !estadoCeldas[c.fila][c.columna].tieneBandera &&
+                            !celdasSeguras.some(s => s.fila === c.fila && s.columna === c.columna)) {
+                            
+                            celdasSeguras.push({
+                                fila: c.fila,
+                                columna: c.columna,
+                                origen: 'análisis de subconjuntos',
+                                celdaOrigen1: r1.celda,
+                                celdaOrigen2: r2.celda
+                            });
+                        }
+                    });
+                }
+            }
+        }
+    }
+    
+    return celdasSeguras;
+};
+
+/**
+ * Verifica si un conjunto de celdas es subconjunto de otro
+ * @param {Array} conjunto1 - Primer conjunto de celdas
+ * @param {Array} conjunto2 - Segundo conjunto de celdas
+ * @returns {boolean} - true si conjunto1 es subconjunto de conjunto2
+ */
+const esSubconjunto = (conjunto1, conjunto2) => {
+    if (conjunto1.length > conjunto2.length) {
+        return false;
+    }
+    
+    // Verificar si cada elemento de conjunto1 está en conjunto2
+    return conjunto1.every(c1 => 
+        conjunto2.some(c2 => c1.fila === c2.fila && c1.columna === c2.columna)
+    );
+};
+
+/**
+ * Detecta patrones específicos como 1-2-1 para identificar banderas
+ * @param {object} modeloTablero - Modelo del tablero
+ * @param {Array} banderasYaIdentificadas - Banderas ya identificadas para no duplicar
+ * @returns {Array} - Nuevas banderas identificadas
+ */
+const detectarPatronesParaBanderas = (modeloTablero, banderasYaIdentificadas) => {
+    const { estadoCeldas, tamañoTablero } = modeloTablero;
+    const { filas, columnas } = tamañoTablero;
+    const nuevasBanderas = [];
+    
+    // Buscar patrones 1-2-1 (horizontal y vertical)
+    const direcciones = [
+        { dx: 1, dy: 0 }, // horizontal
+        { dx: 0, dy: 1 }  // vertical
+    ];
+    
+    // Buscar patrones en cada dirección
+    direcciones.forEach(({ dx, dy }) => {
+        // Recorrer todo el tablero
+        for (let i = 0; i < filas - 2 * dy; i++) {
+            for (let j = 0; j < columnas - 2 * dx; j++) {
+                // Posiciones de las tres celdas en el patrón
+                const pos1 = { fila: i, columna: j };
+                const pos2 = { fila: i + dy, columna: j + dx };
+                const pos3 = { fila: i + 2*dy, columna: j + 2*dx };
+                
+                // Verificar si las tres celdas están descubiertas y tienen los valores 1-2-1
+                if (estadoCeldas[pos1.fila][pos1.columna].descubierta && 
+                    estadoCeldas[pos2.fila][pos2.columna].descubierta && 
+                    estadoCeldas[pos3.fila][pos3.columna].descubierta) {
+                    
+                    const valor1 = estadoCeldas[pos1.fila][pos1.columna].valor;
+                    const valor2 = estadoCeldas[pos2.fila][pos2.columna].valor;
+                    const valor3 = estadoCeldas[pos3.fila][pos3.columna].valor;
+                    
+                    // Verificar si es un patrón 1-2-1
+                    if (valor1 === '1' && valor2 === '2' && valor3 === '1') {
+                        // Buscar las celdas adyacentes al 2 que no son adyacentes a los 1
+                        const adyacentesA2 = obtenerCeldasAdyacentes(pos2.fila, pos2.columna, tamañoTablero);
+                        const adyacentesA1 = obtenerCeldasAdyacentes(pos1.fila, pos1.columna, tamañoTablero);
+                        const adyacentesA3 = obtenerCeldasAdyacentes(pos3.fila, pos3.columna, tamañoTablero);
+                        
+                        // Celdas únicas del 2 (no adyacentes a los 1)
+                        const celdasUnicas = adyacentesA2.filter(c2 => 
+                            !adyacentesA1.some(c1 => c1.fila === c2.fila && c1.columna === c2.columna) &&
+                            !adyacentesA3.some(c3 => c3.fila === c2.fila && c3.columna === c3.columna)
+                        );
+                        
+                        // Si hay exactamente 2 celdas únicas, son minas
+                        if (celdasUnicas.length === 2) {
+                            celdasUnicas.forEach(c => {
+                                // Verificar que no esté descubierta ni tenga bandera ya
+                                if (!estadoCeldas[c.fila][c.columna].descubierta && 
+                                    !estadoCeldas[c.fila][c.columna].tieneBandera &&
+                                    !banderasYaIdentificadas.some(b => b.fila === c.fila && b.columna === c.columna) &&
+                                    !nuevasBanderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
+                                    
+                                    nuevasBanderas.push({
+                                        fila: c.fila,
+                                        columna: c.columna,
+                                        origen: 'patrón 1-2-1',
+                                        patron: {
+                                            celda1: pos1,
+                                            celda2: pos2,
+                                            celda3: pos3
+                                        }
+                                    });
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    return nuevasBanderas;
+};
+
+/**
+ * Detecta patrones específicos para identificar celdas seguras
+ * @param {object} modeloTablero - Modelo del tablero
+ * @returns {Array} - Celdas seguras identificadas
+ */
+const detectarPatronesParaSeguras = (modeloTablero) => {
+    const { estadoCeldas, tamañoTablero } = modeloTablero;
+    const { filas, columnas } = tamañoTablero;
+    const celdasSeguras = [];
+    
+    // Buscar patrones 1-2-1 (horizontal y vertical)
+    const direcciones = [
+        { dx: 1, dy: 0 }, // horizontal
+        { dx: 0, dy: 1 }  // vertical
+    ];
+    
+    // Buscar patrones en cada dirección
+    direcciones.forEach(({ dx, dy }) => {
+        // Recorrer todo el tablero
+        for (let i = 0; i < filas - 2 * dy; i++) {
+            for (let j = 0; j < columnas - 2 * dx; j++) {
+                // Posiciones de las tres celdas en el patrón
+                const pos1 = { fila: i, columna: j };
+                const pos2 = { fila: i + dy, columna: j + dx };
+                const pos3 = { fila: i + 2*dy, columna: j + 2*dx };
+                
+                // Verificar si las tres celdas están descubiertas y tienen los valores 1-2-1
+                if (estadoCeldas[pos1.fila][pos1.columna].descubierta && 
+                    estadoCeldas[pos2.fila][pos2.columna].descubierta && 
+                    estadoCeldas[pos3.fila][pos3.columna].descubierta) {
+                    
+                    const valor1 = estadoCeldas[pos1.fila][pos1.columna].valor;
+                    const valor2 = estadoCeldas[pos2.fila][pos2.columna].valor;
+                    const valor3 = estadoCeldas[pos3.fila][pos3.columna].valor;
+                    
+                    // Verificar si es un patrón 1-2-1
+                    if (valor1 === '1' && valor2 === '2' && valor3 === '1') {
+                        // Buscar las celdas adyacentes a los 1 que no son adyacentes al 2
+                        const adyacentesA2 = obtenerCeldasAdyacentes(pos2.fila, pos2.columna, tamañoTablero);
+                        const adyacentesA1 = obtenerCeldasAdyacentes(pos1.fila, pos1.columna, tamañoTablero);
+                        const adyacentesA3 = obtenerCeldasAdyacentes(pos3.fila, pos3.columna, tamañoTablero);
+                        
+                        // Celdas adyacentes a los 1 pero no al 2 son seguras
+                        const celdasSegurasDe1 = adyacentesA1.filter(c1 => 
+                            !adyacentesA2.some(c2 => c1.fila === c2.fila && c1.columna === c2.columna)
+                        );
+                        
+                        const celdasSegurasDe3 = adyacentesA3.filter(c3 => 
+                            !adyacentesA2.some(c2 => c3.fila === c2.fila && c3.columna === c2.columna)
+                        );
+                        
+                        // Combinar celdas seguras de ambos 1
+                        const todasCeldasSeguras = [...celdasSegurasDe1, ...celdasSegurasDe3];
+                        
+                        todasCeldasSeguras.forEach(c => {
+                            // Verificar que no esté descubierta ni tenga bandera ya
+                            if (!estadoCeldas[c.fila][c.columna].descubierta && 
+                                !estadoCeldas[c.fila][c.columna].tieneBandera &&
+                                !celdasSeguras.some(s => s.fila === c.fila && s.columna === c.columna)) {
+                                
+                                celdasSeguras.push({
+                                    fila: c.fila,
+                                    columna: c.columna,
+                                    origen: 'patrón 1-2-1',
+                                    patron: {
+                                        celda1: pos1,
+                                        celda2: pos2,
+                                        celda3: pos3
+                                    }
+                                });
+                            }
+                        });
+                    }
+                }
+            }
+        }
+    });
+    
+    return celdasSeguras;
 };
