@@ -8,6 +8,7 @@ import GestionInconsistencias from './GestionInconsistencias';
 import { obtenerClasesTema } from '../utils/temas';
 import { seleccionarPrimeraCeldaSegura, analizarTablero, obtenerCeldasAdyacentes } from '../utils/logicaJuego';
 import { verificarConsistenciaRespuesta, verificarConsistenciaGlobal } from '../utils/validacionLogica';
+import { cargarMemoriaJuego, registrarFinJuego, registrarCeldaPeligrosa } from '../utils/MemoriaJuego';
 import { TAMAÑOS_TABLERO, DURACION_ANIMACION, DURACION_MODAL } from '../constants/gameConfig';
 
 const Buscaminas = () => {
@@ -36,6 +37,9 @@ const Buscaminas = () => {
     const [mostrarAdvertencia, setMostrarAdvertencia] = useState(false);
     const [inconsistenciaDetectada, setInconsistenciaDetectada] = useState(null);
     
+    // Estado para la memoria del juego
+    const [memoriaJuego, setMemoriaJuego] = useState(null);
+    
     // Estado para las estadísticas de juego
     const [estadisticas, setEstadisticas] = useState({
         movimientos: 0,
@@ -48,6 +52,20 @@ const Buscaminas = () => {
     
     // Refs para manejar el estado en setTimeout
     const stateRef = useRef({});
+    
+    // Cargar memoria del juego al iniciar
+    useEffect(() => {
+        const memoria = cargarMemoriaJuego();
+        setMemoriaJuego(memoria);
+        
+        // Actualizar estadísticas globales
+        setEstadisticas(prev => ({
+            ...prev,
+            partidasJugadas: memoria.estadisticasGlobales.partidasJugadas,
+            victorias: memoria.estadisticasGlobales.victorias,
+            tiempoTotal: memoria.estadisticasGlobales.tiempoTotal
+        }));
+    }, []);
     
     // Mantener la referencia del estado actualizada
     useEffect(() => {
@@ -164,6 +182,9 @@ const Buscaminas = () => {
                 partidasJugadas: prev.partidasJugadas + 1,
                 tiempoTotal: prev.tiempoTotal + tiempoJuego
             }));
+            
+            // Registrar fin de juego como "abandonado" si estaba en curso
+            registrarFinJuego('abandonado', tiempoJuego, historialMovimientos);
         }
     };
 
@@ -421,9 +442,12 @@ const Buscaminas = () => {
             // Actualizar el tablero con la respuesta del usuario
             const nuevoTablero = [...tablero];
 
-            if (tipo === 'vacío' || tipo === '0') {
-                // Considerar tanto 'vacío' como '0' como equivalentes
-                nuevoTablero[fila][columna] = tipo === 'vacío' ? '' : '0';
+            if (tipo === 'vacío') {
+                // 'vacío' es realmente vacío, no un 0
+                nuevoTablero[fila][columna] = '';
+            } else if (tipo === '0') {
+                // '0' es un valor numérico diferente de vacío
+                nuevoTablero[fila][columna] = '0';
             } else if (tipo === 'mina') {
                 nuevoTablero[fila][columna] = 'M';
             } else {
@@ -463,6 +487,12 @@ const Buscaminas = () => {
 
             // Verificar si el sistema ha perdido (encontró una mina)
             if (tipo === 'mina') {
+                // Registrar la celda peligrosa en la memoria
+                registrarCeldaPeligrosa(fila, columna);
+                
+                // Registrar patrón de juego que llevó a la pérdida
+                registrarFinJuego('derrota', tiempoJuego, nuevoHistorial);
+                
                 setJuegoTerminado(true);
                 stateRef.current.juegoTerminado = true;
                 setMensajeSistema("¡BOOM! El sistema encontró una mina.");
@@ -514,6 +544,9 @@ const Buscaminas = () => {
         
         // Si todas las celdas no descubiertas tienen banderas, es victoria
         if (celdasNoDescubiertas === banderasColocadas) {
+            // Registrar victoria en memoria
+            registrarFinJuego('victoria', tiempoJuego, historialMovimientos);
+            
             setJuegoTerminado(true);
             stateRef.current.juegoTerminado = true;
             setMensajeSistema("¡El sistema ha descubierto todas las celdas seguras! ¡Victoria!");
@@ -625,8 +658,6 @@ const Buscaminas = () => {
                             tema={tema}
                         />
                     )}
-
-                    {/* Nota: El ModeloMentalVisualizador fue eliminado para que no se muestre en la interfaz */}
 
                     <TableroJuego 
                         tablero={tablero}
