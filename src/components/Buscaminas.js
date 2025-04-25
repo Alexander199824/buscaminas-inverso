@@ -6,9 +6,22 @@ import ModalAnimacion from './ModalAnimacion';
 import PanelRespuesta from './PanelRespuesta';
 import GestionInconsistencias from './GestionInconsistencias';
 import { obtenerClasesTema } from '../utils/temas';
-import { seleccionarPrimeraCeldaSegura, analizarTablero, obtenerCeldasAdyacentes } from '../utils/logicaJuego';
+import {
+    seleccionarPrimeraCeldaSegura,
+    analizarTablero,
+    obtenerCeldasAdyacentes,
+    aprenderDeDerrota  // Importar la función aprenderDeDerrota
+} from '../utils/logicaJuego';
 import { verificarConsistenciaRespuesta, verificarConsistenciaGlobal } from '../utils/validacionLogica';
-import { cargarMemoriaJuego, registrarFinJuego, registrarCeldaPeligrosa } from '../utils/MemoriaJuego';
+import {
+    inicializarMemoria,
+    guardarMemoria,
+    registrarMinaEncontrada,
+    registrarSecuenciaPerdedora,
+    registrarVictoria,
+    evaluarCeldaConMemoria,
+    determinarMejorSegundoMovimiento // Importar las funciones de MemoriaJuego
+} from '../utils/MemoriaJuego';
 import { TAMAÑOS_TABLERO, DURACION_ANIMACION, DURACION_MODAL } from '../constants/gameConfig';
 
 const Buscaminas = () => {
@@ -32,14 +45,14 @@ const Buscaminas = () => {
     const [mensajeModal, setMensajeModal] = useState('');
     const [tipoModal, setTipoModal] = useState('');
     const [intervaloBusqueda, setIntervaloBusqueda] = useState(null);
-    
+
     // Estados para la validación de inconsistencias
     const [mostrarAdvertencia, setMostrarAdvertencia] = useState(false);
     const [inconsistenciaDetectada, setInconsistenciaDetectada] = useState(null);
-    
+
     // Estado para la memoria del juego
-    const [memoriaJuego, setMemoriaJuego] = useState(null);
-    
+    const [memoriaJuego, setMemoriaJuego] = useState(inicializarMemoria()); // Inicializar aquí
+
     // Estado para las estadísticas de juego
     const [estadisticas, setEstadisticas] = useState({
         movimientos: 0,
@@ -49,24 +62,26 @@ const Buscaminas = () => {
         partidasJugadas: 0,
         victorias: 0
     });
-    
+
     // Refs para manejar el estado en setTimeout
     const stateRef = useRef({});
-    
+
     // Cargar memoria del juego al iniciar
     useEffect(() => {
-        const memoria = cargarMemoriaJuego();
-        setMemoriaJuego(memoria);
-        
         // Actualizar estadísticas globales
         setEstadisticas(prev => ({
             ...prev,
-            partidasJugadas: memoria.estadisticasGlobales.partidasJugadas,
-            victorias: memoria.estadisticasGlobales.victorias,
-            tiempoTotal: memoria.estadisticasGlobales.tiempoTotal
+            partidasJugadas: memoriaJuego.estadisticas?.partidasJugadas || 0,
+            victorias: memoriaJuego.estadisticas?.victorias || 0,
+            tiempoTotal: memoriaJuego.estadisticas?.tiempoTotal || 0
         }));
     }, []);
-    
+
+    // Guardar la memoria del juego cuando cambie
+    useEffect(() => {
+        guardarMemoria(memoriaJuego);
+    }, [memoriaJuego]);
+
     // Mantener la referencia del estado actualizada
     useEffect(() => {
         stateRef.current = {
@@ -174,7 +189,7 @@ const Buscaminas = () => {
             clearInterval(intervaloBusqueda);
             setIntervaloBusqueda(null);
         }
-        
+
         // Actualizar estadísticas si era un juego en curso
         if (juegoIniciado) {
             setEstadisticas(prev => ({
@@ -182,9 +197,9 @@ const Buscaminas = () => {
                 partidasJugadas: prev.partidasJugadas + 1,
                 tiempoTotal: prev.tiempoTotal + tiempoJuego
             }));
-            
-            // Registrar fin de juego como "abandonado" si estaba en curso
-            registrarFinJuego('abandonado', tiempoJuego, historialMovimientos);
+
+            // Registrar fin de juego como perdido si estaba en curso
+            registrarSecuenciaPerdedora(memoriaJuego, historialMovimientos, tamañoSeleccionado);
         }
     };
 
@@ -195,11 +210,11 @@ const Buscaminas = () => {
         try {
             // Obtener una celda inicial aleatoria garantizando variabilidad
             const celdaInicial = seleccionarPrimeraCeldaSegura(tamañoSeleccionado);
-            
+
             seleccionarCelda(celdaInicial.fila, celdaInicial.columna);
             setMensajeSistema(`El sistema ha seleccionado la casilla (${celdaInicial.fila + 1},${celdaInicial.columna + 1}). ¿Qué hay en esta casilla?`);
             setAnimacion('iniciar');
-            
+
             // Inicializar estadísticas para la partida actual
             setEstadisticas(prev => ({
                 ...prev,
@@ -224,7 +239,7 @@ const Buscaminas = () => {
             const validCeldasDescubiertas = stateRef.current.celdasDescubiertas || celdasDescubiertas;
             const validBanderas = stateRef.current.banderas || banderas;
             const validHistorialMovimientos = stateRef.current.historialMovimientos || historialMovimientos;
-            
+
             // Analizar el tablero para decidir la siguiente jugada
             const resultadoAnalisis = analizarTablero({
                 tablero: validTablero,
@@ -235,11 +250,11 @@ const Buscaminas = () => {
                 setMensajeSistema,
                 setAnimacion
             });
-            
+
             // Actualizar banderas si se encontraron nuevas
             if (resultadoAnalisis.banderas && resultadoAnalisis.banderas.length > validBanderas.length) {
                 setBanderas(resultadoAnalisis.banderas);
-                
+
                 // Actualizar historial con las nuevas banderas
                 let nuevoHistorial = [...validHistorialMovimientos];
                 if (resultadoAnalisis.movimientosGenerados && resultadoAnalisis.movimientosGenerados.length > 0) {
@@ -250,24 +265,24 @@ const Buscaminas = () => {
                     });
                     setHistorialMovimientos(nuevoHistorial);
                 }
-                
+
                 // Actualizar estadísticas
                 setEstadisticas(prev => ({
                     ...prev,
                     banderasColocadas: resultadoAnalisis.banderas.length
                 }));
-                
+
                 // Mostrar animación
                 setAnimacion('bandera');
             }
-            
+
             // Si hay una siguiente celda, seleccionarla después de una breve pausa
             if (resultadoAnalisis.siguienteCelda) {
                 setTimeout(() => {
                     try {
                         if (!stateRef.current.esperandoRespuesta && !stateRef.current.juegoTerminado) {
                             seleccionarCelda(
-                                resultadoAnalisis.siguienteCelda.fila, 
+                                resultadoAnalisis.siguienteCelda.fila,
                                 resultadoAnalisis.siguienteCelda.columna
                             );
                         }
@@ -292,15 +307,15 @@ const Buscaminas = () => {
             if (stateRef.current.juegoTerminado) {
                 return;
             }
-            
+
             // Verificar si ya estamos esperando una respuesta
             if (stateRef.current.esperandoRespuesta) {
                 return;
             }
 
             // Validar que las coordenadas son correctas
-            if (fila === undefined || columna === undefined || 
-                fila < 0 || columna < 0 || 
+            if (fila === undefined || columna === undefined ||
+                fila < 0 || columna < 0 ||
                 fila >= tamañoSeleccionado.filas || columna >= tamañoSeleccionado.columnas) {
                 console.error("Coordenadas de celda inválidas:", fila, columna);
                 return;
@@ -321,7 +336,7 @@ const Buscaminas = () => {
             setCeldaActual({ fila, columna });
             setEsperandoRespuesta(true);
             setAnimacion('seleccionar');
-            
+
             // Actualizar estadísticas
             setEstadisticas(prev => ({
                 ...prev,
@@ -335,21 +350,21 @@ const Buscaminas = () => {
     // Aplicar una respuesta a pesar de la inconsistencia
     const aplicarRespuestaConInconsistencia = () => {
         if (!inconsistenciaDetectada || !celdaActual) return;
-        
+
         // Verificar si es una inconsistencia crítica que no se puede ignorar
-        if (inconsistenciaDetectada.contradicciones && 
+        if (inconsistenciaDetectada.contradicciones &&
             inconsistenciaDetectada.contradicciones.length > 0 &&
-            (inconsistenciaDetectada.contradicciones[0].tipo === 'exceso_minas' || 
-             inconsistenciaDetectada.contradicciones[0].tipo === 'exceso_banderas')) {
+            (inconsistenciaDetectada.contradicciones[0].tipo === 'exceso_minas' ||
+                inconsistenciaDetectada.contradicciones[0].tipo === 'exceso_banderas')) {
             // No permitir continuar con errores críticos
             setMostrarAdvertencia(false);
             return;
         }
-        
+
         // Continuar con la respuesta a pesar de la inconsistencia
         const { fila, columna } = celdaActual;
         const tipo = tipoRespuesta;
-        
+
         // Actualizar tablero
         const nuevoTablero = [...tablero];
         if (tipo === 'vacío') {
@@ -359,7 +374,7 @@ const Buscaminas = () => {
         } else {
             nuevoTablero[fila][columna] = tipo;
         }
-        
+
         // Actualizar estado
         setTablero(nuevoTablero);
         setCeldasDescubiertas([...celdasDescubiertas, { fila, columna }]);
@@ -369,7 +384,7 @@ const Buscaminas = () => {
             contenido: tipo,
             inconsistente: true
         }]);
-        
+
         // Actualizar el stateRef
         stateRef.current = {
             ...stateRef.current,
@@ -382,15 +397,15 @@ const Buscaminas = () => {
                 inconsistente: true
             }]
         };
-        
+
         // Limpiar estado de inconsistencia
         setInconsistenciaDetectada(null);
         setMostrarAdvertencia(false);
-        
+
         // Continuar con el juego
         setEsperandoRespuesta(false);
         stateRef.current.esperandoRespuesta = false;
-        
+
         setAnimacion('respuesta');
         setTimeout(() => {
             if (!stateRef.current.esperandoRespuesta && !stateRef.current.juegoTerminado) {
@@ -423,17 +438,17 @@ const Buscaminas = () => {
             // Si detectamos una inconsistencia
             if (!resultadoValidacion.esConsistente) {
                 setInconsistenciaDetectada(resultadoValidacion);
-                
+
                 // Determinar si es una inconsistencia crítica
                 const esInconsistenciaCritica = resultadoValidacion.contradicciones.some(
                     c => c.tipo === 'exceso_minas' || c.tipo === 'exceso_banderas'
                 );
-                
+
                 if (esInconsistenciaCritica) {
                     setMostrarAdvertencia(true);
                     return; // No permitir continuar con contradicciones críticas
                 }
-                
+
                 // Mostrar advertencia pero permitir continuar
                 setMostrarAdvertencia(true);
                 return;
@@ -488,11 +503,11 @@ const Buscaminas = () => {
             // Verificar si el sistema ha perdido (encontró una mina)
             if (tipo === 'mina') {
                 // Registrar la celda peligrosa en la memoria
-                registrarCeldaPeligrosa(fila, columna);
-                
+                registrarMinaEncontrada(memoriaJuego, fila, columna, tamañoSeleccionado);
+
                 // Registrar patrón de juego que llevó a la pérdida
-                registrarFinJuego('derrota', tiempoJuego, nuevoHistorial);
-                
+                registrarSecuenciaPerdedora(memoriaJuego, nuevoHistorial, tamañoSeleccionado);
+
                 setJuegoTerminado(true);
                 stateRef.current.juegoTerminado = true;
                 setMensajeSistema("¡BOOM! El sistema encontró una mina.");
@@ -502,7 +517,7 @@ const Buscaminas = () => {
                 setTipoModal('error');
                 setEsperandoRespuesta(false);
                 stateRef.current.esperandoRespuesta = false;
-                
+
                 // Actualizar estadísticas
                 setEstadisticas(prev => ({
                     ...prev,
@@ -510,11 +525,14 @@ const Buscaminas = () => {
                     victorias: prev.victorias + 1,
                     tiempoTotal: prev.tiempoTotal + tiempoJuego
                 }));
+
+                // Aprender de la derrota (actualizar historial de derrotas)
+                aprenderDeDerrota({ fila, columna });
             } else {
                 // IMPORTANTE: Desactivar esperandoRespuesta ANTES de llamar a la siguiente selección
                 setEsperandoRespuesta(false);
                 stateRef.current.esperandoRespuesta = false;
-                
+
                 setAnimacion('respuesta');
 
                 // Analizar el tablero para buscar nuevos patrones
@@ -526,7 +544,7 @@ const Buscaminas = () => {
             }
         } catch (error) {
             console.error("Error al responder contenido de celda:", error);
-            
+
             // Restablecer estado en caso de error
             setEsperandoRespuesta(false);
             stateRef.current.esperandoRespuesta = false;
@@ -537,16 +555,16 @@ const Buscaminas = () => {
     const verificarVictoria = () => {
         const { filas, columnas } = tamañoSeleccionado;
         const totalCeldas = filas * columnas;
-        
+
         // Asumimos que solo quedan minas por descubrir
         const celdasNoDescubiertas = totalCeldas - celdasDescubiertas.length;
         const banderasColocadas = banderas.length;
-        
+
         // Si todas las celdas no descubiertas tienen banderas, es victoria
         if (celdasNoDescubiertas === banderasColocadas) {
             // Registrar victoria en memoria
-            registrarFinJuego('victoria', tiempoJuego, historialMovimientos);
-            
+            registrarVictoria(memoriaJuego, historialMovimientos, tamañoSeleccionado);
+
             setJuegoTerminado(true);
             stateRef.current.juegoTerminado = true;
             setMensajeSistema("¡El sistema ha descubierto todas las celdas seguras! ¡Victoria!");
@@ -554,17 +572,17 @@ const Buscaminas = () => {
             setMostrarModal(true);
             setMensajeModal('¡Victoria! El sistema ha identificado correctamente todas las minas.');
             setTipoModal('éxito');
-            
+
             // Actualizar estadísticas
             setEstadisticas(prev => ({
                 ...prev,
                 partidasJugadas: prev.partidasJugadas + 1,
                 tiempoTotal: prev.tiempoTotal + tiempoJuego
             }));
-            
+
             return true;
         }
-        
+
         return false;
     };
 
@@ -609,7 +627,7 @@ const Buscaminas = () => {
 
     return (
         <div className={`flex min-h-screen w-full ${tema.principal}`}>
-            <ModalAnimacion 
+            <ModalAnimacion
                 mostrarModal={mostrarModal}
                 mensajeModal={mensajeModal}
                 tipoModal={tipoModal}
@@ -629,7 +647,7 @@ const Buscaminas = () => {
             />
 
             <div className="w-full max-w-full flex flex-col md:flex-row">
-                <PanelLateralIzquierdo 
+                <PanelLateralIzquierdo
                     tema={tema}
                     temaColor={temaColor}
                     cambiarTemaColor={cambiarTemaColor}
@@ -651,7 +669,7 @@ const Buscaminas = () => {
                 <div className="w-full md:w-2/4 p-4 flex flex-col">
                     {/* Panel de respuesta */}
                     {esperandoRespuesta && !juegoTerminado && celdaActual && !mostrarAdvertencia && (
-                        <PanelRespuesta 
+                        <PanelRespuesta
                             celdaActual={celdaActual}
                             tipoRespuesta={tipoRespuesta}
                             responderContenidoCelda={responderContenidoCelda}
@@ -659,7 +677,7 @@ const Buscaminas = () => {
                         />
                     )}
 
-                    <TableroJuego 
+                    <TableroJuego
                         tablero={tablero}
                         tamañoSeleccionado={tamañoSeleccionado}
                         celdaActual={celdaActual}
@@ -672,7 +690,7 @@ const Buscaminas = () => {
                     />
                 </div>
 
-                <PanelLateralDerecho 
+                <PanelLateralDerecho
                     tema={tema}
                     mensajeSistema={mensajeSistema}
                     juegoIniciado={juegoIniciado}
