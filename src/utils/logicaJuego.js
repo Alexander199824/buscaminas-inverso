@@ -87,6 +87,8 @@ export const distanciaBorde = (fila, columna, tamañoTablero) => {
  */
 let historialSeleccionesAleatorias = [];
 
+
+
 /**
  * Seleccionar una celda para el primer movimiento considerando memoria histórica
  * @param {object} tamañoTablero - Objeto con filas y columnas del tablero
@@ -102,13 +104,28 @@ export const seleccionarPrimeraCeldaSegura = (tamañoTablero, memoriaJuego = nul
     
     const { filas, columnas } = tamañoTablero;
     
+    // Control de historial para prevenir errores
+    if (!historialSeleccionesAleatorias) {
+        historialSeleccionesAleatorias = [];
+    }
+    
     // Reiniciar historial si se cambia el tamaño del tablero
     if (historialSeleccionesAleatorias.length > 0) {
-        const primeraSeleccion = historialSeleccionesAleatorias[0].split(',');
-        const filaHistorial = parseInt(primeraSeleccion[0]);
-        
-        // Si la fila está fuera del rango del nuevo tablero, reiniciar historial
-        if (filaHistorial >= filas) {
+        try {
+            const primeraSeleccion = historialSeleccionesAleatorias[0].split(',');
+            if (primeraSeleccion && primeraSeleccion.length >= 1) {
+                const filaHistorial = parseInt(primeraSeleccion[0]);
+                
+                // Si la fila está fuera del rango del nuevo tablero, reiniciar historial
+                if (filaHistorial >= filas) {
+                    historialSeleccionesAleatorias = [];
+                }
+            } else {
+                // Historial malformado, reiniciarlo
+                historialSeleccionesAleatorias = [];
+            }
+        } catch (error) {
+            console.error("Error al procesar historial de selecciones:", error);
             historialSeleccionesAleatorias = [];
         }
     }
@@ -121,6 +138,31 @@ export const seleccionarPrimeraCeldaSegura = (tamañoTablero, memoriaJuego = nul
     // Lista de todas las posibles ubicaciones con su evaluación
     const todasLasUbicaciones = [];
     
+    // Obtener minas conocidas del historial (si existe memoria)
+    const minasConocidas = [];
+    if (memoriaJuego && memoriaJuego.mapaCalorMinas) {
+        // Convertir coordenadas normalizadas a coordenadas reales de tablero
+        for (const claveNorm in memoriaJuego.mapaCalorMinas) {
+            try {
+                const [filaNorm, columnaNorm] = claveNorm.split(',').map(parseFloat);
+                
+                // Denormalizar para el tamaño actual del tablero
+                const fila = Math.round(filaNorm * (filas - 1));
+                const columna = Math.round(columnaNorm * (columnas - 1));
+                
+                // Solo considerar coordenadas válidas para este tablero
+                if (fila >= 0 && fila < filas && columna >= 0 && columna < columnas) {
+                    minasConocidas.push({ fila, columna });
+                    console.log(`MEMORIA: Mina conocida en (${fila}, ${columna}) - Valor normalizado: ${claveNorm}`);
+                }
+            } catch (error) {
+                console.error("Error al procesar mina conocida:", claveNorm, error);
+            }
+        }
+    }
+    
+    console.log(`Total de minas conocidas: ${minasConocidas.length}`);
+    
     // Evaluar todas las celdas
     for (let i = 0; i < filas; i++) {
         for (let j = 0; j < columnas; j++) {
@@ -129,6 +171,12 @@ export const seleccionarPrimeraCeldaSegura = (tamañoTablero, memoriaJuego = nul
             
             // Si ya está en el historial reciente, saltarla
             if (historialSeleccionesAleatorias.includes(clave)) {
+                continue;
+            }
+            
+            // IMPORTANTE: Si esta celda es una mina conocida, NO considerarla en absoluto
+            if (minasConocidas.some(mina => mina.fila === i && mina.columna === j)) {
+                console.log(`Saltando mina conocida en (${i}, ${j})`);
                 continue;
             }
             
@@ -160,12 +208,36 @@ export const seleccionarPrimeraCeldaSegura = (tamañoTablero, memoriaJuego = nul
             let confianza = "media";
             
             if (memoriaJuego) {
-                const evaluacion = evaluarCeldaConMemoria(
-                    memoriaJuego, i, j, tamañoTablero, []
-                );
-                factorRiesgo = evaluacion.factorRiesgo;
-                razonamiento = [...razonamiento, ...evaluacion.razonamiento];
-                confianza = evaluacion.confianza;
+                try {
+                    const evaluacion = evaluarCeldaConMemoria(
+                        memoriaJuego, i, j, tamañoTablero, []
+                    );
+                    
+                    if (evaluacion) {
+                        factorRiesgo = evaluacion.factorRiesgo || 0;
+                        if (evaluacion.razonamiento) {
+                            razonamiento = [...razonamiento, ...evaluacion.razonamiento];
+                        }
+                        confianza = evaluacion.confianza || "media";
+                    }
+                } catch (error) {
+                    console.error("Error al evaluar celda con memoria:", error);
+                    // Si hay un error en la evaluación, usar valores predeterminados
+                }
+            }
+            
+            // Aumentar significativamente el factor de riesgo para celdas cercanas a minas conocidas
+            if (minasConocidas.length > 0) {
+                for (const mina of minasConocidas) {
+                    const distancia = Math.abs(mina.fila - i) + Math.abs(mina.columna - j);
+                    
+                    // Si está muy cerca de una mina conocida, aumentar el riesgo
+                    if (distancia <= 2) {
+                        const factorCercania = Math.max(0, 0.5 - (distancia * 0.2));
+                        factorRiesgo += factorCercania;
+                        razonamiento.push(`Cerca de mina conocida (${mina.fila},${mina.columna})`);
+                    }
+                }
             }
             
             // El valor final es inverso al riesgo (más riesgo = menos valor)
@@ -175,6 +247,7 @@ export const seleccionarPrimeraCeldaSegura = (tamañoTablero, memoriaJuego = nul
                 fila: i,
                 columna: j,
                 valor: valorFinal,
+                factorRiesgo,
                 razonamiento,
                 confianza
             });
@@ -183,6 +256,7 @@ export const seleccionarPrimeraCeldaSegura = (tamañoTablero, memoriaJuego = nul
     
     // Si no hay ubicaciones disponibles (raro), permitir reutilizar
     if (todasLasUbicaciones.length === 0) {
+        console.warn("No hay ubicaciones disponibles, reciclando...");
         // Reiniciar historial y volver a intentar sin restricciones
         historialSeleccionesAleatorias = [];
         return seleccionarPrimeraCeldaSegura(tamañoTablero, memoriaJuego);
@@ -191,11 +265,18 @@ export const seleccionarPrimeraCeldaSegura = (tamañoTablero, memoriaJuego = nul
     // Ordenar por valor (mayor primero)
     todasLasUbicaciones.sort((a, b) => b.valor - a.valor);
     
+    // Log de las mejores opciones para depuración
+    console.log("Mejores opciones:");
+    todasLasUbicaciones.slice(0, 5).forEach((opcion, idx) => {
+        console.log(`${idx+1}. (${opcion.fila},${opcion.columna}) - Valor: ${opcion.valor}, Riesgo: ${opcion.factorRiesgo}`);
+    });
+    
     // Agregar algo de aleatoriedad: seleccionar entre el top 20% de opciones
     const topOpciones = Math.max(1, Math.ceil(todasLasUbicaciones.length * 0.2));
     const indiceAleatorio = Math.floor(Math.random() * topOpciones);
     
     const seleccion = todasLasUbicaciones[indiceAleatorio];
+    console.log(`Seleccionada: (${seleccion.fila},${seleccion.columna}) - Valor: ${seleccion.valor}, Riesgo: ${seleccion.factorRiesgo}`);
     
     // Añadir al historial
     historialSeleccionesAleatorias.push(`${seleccion.fila},${seleccion.columna}`);

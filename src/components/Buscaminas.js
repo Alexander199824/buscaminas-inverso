@@ -10,7 +10,7 @@ import {
     seleccionarPrimeraCeldaSegura,
     analizarTablero,
     obtenerCeldasAdyacentes,
-    aprenderDeDerrota  // Importar la función aprenderDeDerrota
+    aprenderDeDerrota
 } from '../utils/logicaJuego';
 import { verificarConsistenciaRespuesta, verificarConsistenciaGlobal } from '../utils/validacionLogica';
 import {
@@ -20,7 +20,7 @@ import {
     registrarSecuenciaPerdedora,
     registrarVictoria,
     evaluarCeldaConMemoria,
-    determinarMejorSegundoMovimiento // Importar las funciones de MemoriaJuego
+    determinarMejorSegundoMovimiento
 } from '../utils/MemoriaJuego';
 import { TAMAÑOS_TABLERO, DURACION_ANIMACION, DURACION_MODAL } from '../constants/gameConfig';
 
@@ -51,7 +51,7 @@ const Buscaminas = () => {
     const [inconsistenciaDetectada, setInconsistenciaDetectada] = useState(null);
 
     // Estado para la memoria del juego
-    const [memoriaJuego, setMemoriaJuego] = useState(inicializarMemoria()); // Inicializar aquí
+    const [memoriaJuego, setMemoriaJuego] = useState(inicializarMemoria());
 
     // Estado para las estadísticas de juego
     const [estadisticas, setEstadisticas] = useState({
@@ -79,7 +79,9 @@ const Buscaminas = () => {
 
     // Guardar la memoria del juego cuando cambie
     useEffect(() => {
-        guardarMemoria(memoriaJuego);
+        if (memoriaJuego) {
+            guardarMemoria(memoriaJuego);
+        }
     }, [memoriaJuego]);
 
     // Mantener la referencia del estado actualizada
@@ -199,7 +201,13 @@ const Buscaminas = () => {
             }));
 
             // Registrar fin de juego como perdido si estaba en curso
-            registrarSecuenciaPerdedora(memoriaJuego, historialMovimientos, tamañoSeleccionado);
+            try {
+                if (memoriaJuego && historialMovimientos.length > 0) {
+                    registrarSecuenciaPerdedora(memoriaJuego, historialMovimientos, tamañoSeleccionado);
+                }
+            } catch (error) {
+                console.error("Error al registrar secuencia perdedora:", error);
+            }
         }
     };
 
@@ -209,7 +217,16 @@ const Buscaminas = () => {
 
         try {
             // Obtener una celda inicial aleatoria garantizando variabilidad
-            const celdaInicial = seleccionarPrimeraCeldaSegura(tamañoSeleccionado);
+            const celdaInicial = seleccionarPrimeraCeldaSegura(tamañoSeleccionado, memoriaJuego);
+
+            // Verificar que la celda inicial es válida
+            if (!celdaInicial || celdaInicial.fila === undefined || celdaInicial.columna === undefined) {
+                console.error("Error: seleccionarPrimeraCeldaSegura retornó una celda inválida", celdaInicial);
+                // En caso de error, usar una posición por defecto
+                seleccionarCelda(0, 0);
+                setMensajeSistema("El sistema ha seleccionado la primera casilla. ¿Qué hay en esta casilla?");
+                return;
+            }
 
             seleccionarCelda(celdaInicial.fila, celdaInicial.columna);
             setMensajeSistema(`El sistema ha seleccionado la casilla (${celdaInicial.fila + 1},${celdaInicial.columna + 1}). ¿Qué hay en esta casilla?`);
@@ -222,6 +239,8 @@ const Buscaminas = () => {
                 banderasColocadas: 0,
                 celdasSeguras: 0
             }));
+            
+            console.log("Juego iniciado con celda:", celdaInicial);
         } catch (error) {
             console.error("Error al iniciar juego:", error);
             // En caso de error, seleccionar la primera celda
@@ -248,7 +267,8 @@ const Buscaminas = () => {
                 banderas: validBanderas,
                 historialMovimientos: validHistorialMovimientos,
                 setMensajeSistema,
-                setAnimacion
+                setAnimacion,
+                memoriaJuego
             });
 
             // Actualizar banderas si se encontraron nuevas
@@ -418,6 +438,7 @@ const Buscaminas = () => {
     const responderContenidoCelda = (tipo) => {
         try {
             if (!celdaActual || !esperandoRespuesta) {
+                console.log("No hay celda actual o no se espera respuesta");
                 return;
             }
 
@@ -502,32 +523,41 @@ const Buscaminas = () => {
 
             // Verificar si el sistema ha perdido (encontró una mina)
             if (tipo === 'mina') {
-                // Registrar la celda peligrosa en la memoria
-                registrarMinaEncontrada(memoriaJuego, fila, columna, tamañoSeleccionado);
+                try {
+                    // Registrar la celda peligrosa en la memoria
+                    if (memoriaJuego) {
+                        registrarMinaEncontrada(memoriaJuego, fila, columna, tamañoSeleccionado);
+                        
+                        // Registrar patrón de juego que llevó a la pérdida
+                        registrarSecuenciaPerdedora(memoriaJuego, nuevoHistorial, tamañoSeleccionado);
+                    }
 
-                // Registrar patrón de juego que llevó a la pérdida
-                registrarSecuenciaPerdedora(memoriaJuego, nuevoHistorial, tamañoSeleccionado);
+                    // Actualizar estado del juego
+                    setJuegoTerminado(true);
+                    stateRef.current.juegoTerminado = true;
+                    setMensajeSistema("¡BOOM! El sistema encontró una mina.");
+                    setAnimacion('explosion');
+                    setMostrarModal(true);
+                    setMensajeModal('¡PUM! Has ganado. El sistema encontró una mina. ¿Quieres intentar de nuevo?');
+                    setTipoModal('error');
+                    setEsperandoRespuesta(false);
+                    stateRef.current.esperandoRespuesta = false;
 
-                setJuegoTerminado(true);
-                stateRef.current.juegoTerminado = true;
-                setMensajeSistema("¡BOOM! El sistema encontró una mina.");
-                setAnimacion('explosion');
-                setMostrarModal(true);
-                setMensajeModal('¡PUM! Has ganado. El sistema encontró una mina. ¿Quieres intentar de nuevo?');
-                setTipoModal('error');
-                setEsperandoRespuesta(false);
-                stateRef.current.esperandoRespuesta = false;
+                    // Actualizar estadísticas
+                    setEstadisticas(prev => ({
+                        ...prev,
+                        partidasJugadas: prev.partidasJugadas + 1,
+                        victorias: prev.victorias + 1,
+                        tiempoTotal: prev.tiempoTotal + tiempoJuego
+                    }));
 
-                // Actualizar estadísticas
-                setEstadisticas(prev => ({
-                    ...prev,
-                    partidasJugadas: prev.partidasJugadas + 1,
-                    victorias: prev.victorias + 1,
-                    tiempoTotal: prev.tiempoTotal + tiempoJuego
-                }));
-
-                // Aprender de la derrota (actualizar historial de derrotas)
-                aprenderDeDerrota({ fila, columna });
+                    // Aprender de la derrota (actualizar historial de derrotas)
+                    aprenderDeDerrota({ fila, columna });
+                    
+                    console.log("Juego terminado: se encontró una mina en", fila, columna);
+                } catch (error) {
+                    console.error("Error al procesar derrota:", error);
+                }
             } else {
                 // IMPORTANTE: Desactivar esperandoRespuesta ANTES de llamar a la siguiente selección
                 setEsperandoRespuesta(false);
@@ -562,25 +592,31 @@ const Buscaminas = () => {
 
         // Si todas las celdas no descubiertas tienen banderas, es victoria
         if (celdasNoDescubiertas === banderasColocadas) {
-            // Registrar victoria en memoria
-            registrarVictoria(memoriaJuego, historialMovimientos, tamañoSeleccionado);
+            try {
+                // Registrar victoria en memoria
+                if (memoriaJuego) {
+                    registrarVictoria(memoriaJuego, historialMovimientos, tamañoSeleccionado);
+                }
 
-            setJuegoTerminado(true);
-            stateRef.current.juegoTerminado = true;
-            setMensajeSistema("¡El sistema ha descubierto todas las celdas seguras! ¡Victoria!");
-            setAnimacion('victoria');
-            setMostrarModal(true);
-            setMensajeModal('¡Victoria! El sistema ha identificado correctamente todas las minas.');
-            setTipoModal('éxito');
+                setJuegoTerminado(true);
+                stateRef.current.juegoTerminado = true;
+                setMensajeSistema("¡El sistema ha descubierto todas las celdas seguras! ¡Victoria!");
+                setAnimacion('victoria');
+                setMostrarModal(true);
+                setMensajeModal('¡Victoria! El sistema ha identificado correctamente todas las minas.');
+                setTipoModal('éxito');
 
-            // Actualizar estadísticas
-            setEstadisticas(prev => ({
-                ...prev,
-                partidasJugadas: prev.partidasJugadas + 1,
-                tiempoTotal: prev.tiempoTotal + tiempoJuego
-            }));
+                // Actualizar estadísticas
+                setEstadisticas(prev => ({
+                    ...prev,
+                    partidasJugadas: prev.partidasJugadas + 1,
+                    tiempoTotal: prev.tiempoTotal + tiempoJuego
+                }));
 
-            return true;
+                return true;
+            } catch (error) {
+                console.error("Error al procesar victoria:", error);
+            }
         }
 
         return false;
