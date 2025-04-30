@@ -600,14 +600,49 @@ const identificarTodasLasBanderas = (modeloTablero) => {
 
 /**
  * Encuentra celdas seguras con 100% de certeza
+ * Mejorado para identificar automáticamente celdas adyacentes a ceros
  * @param {object} modeloTablero - Modelo completo del tablero
  * @returns {Array} - Lista de celdas seguras
  */
-const identificarCeldasSeguras = (modeloTablero) => {
-    const { restricciones, estadoCeldas, banderas } = modeloTablero;
+export const identificarCeldasSeguras = (modeloTablero) => {
+    const { restricciones, estadoCeldas, banderas, tamañoTablero } = modeloTablero;
     const celdasSeguras = [];
     
-    // 1. ANÁLISIS SIMPLE: Si una restricción tiene todas sus minas identificadas,
+    // NUEVA VERIFICACIÓN: Identificar específicamente celdas adyacentes a ceros
+    // Esto es crítico porque las celdas adyacentes a un cero son siempre seguras
+    for (let i = 0; i < tamañoTablero.filas; i++) {
+        for (let j = 0; j < tamañoTablero.columnas; j++) {
+            // Si la celda está descubierta y es un 0 (o vacío)
+            if (estadoCeldas[i][j].descubierta && 
+                (estadoCeldas[i][j].valor === '0' || estadoCeldas[i][j].valor === '')) {
+                
+                // Todas las celdas adyacentes a un 0 son seguras
+                const celdasAdyacentes = obtenerCeldasAdyacentes(i, j, tamañoTablero);
+                
+                celdasAdyacentes.forEach(c => {
+                    // Verificar que no esté ya descubierta o tenga bandera
+                    if (!estadoCeldas[c.fila][c.columna].descubierta && 
+                        !estadoCeldas[c.fila][c.columna].tieneBandera &&
+                        !celdasSeguras.some(s => s.fila === c.fila && s.columna === c.columna)) {
+                        
+                        celdasSeguras.push({
+                            fila: c.fila,
+                            columna: c.columna,
+                            origen: 'adyacente a cero',
+                            celdaOrigen: { fila: i, columna: j },
+                            prioridad: 'alta' // Alta prioridad para propagar ceros rápidamente
+                        });
+                        
+                        // Actualizar modelo
+                        estadoCeldas[c.fila][c.columna].esSegura = true;
+                        estadoCeldas[c.fila][c.columna].probabilidadMina = 0;
+                    }
+                });
+            }
+        }
+    }
+    
+    // ANÁLISIS POR RESTRICCIONES: Si una restricción tiene todas sus minas identificadas,
     // el resto de celdas adyacentes son seguras
     restricciones.forEach(restriccion => {
         const { celda, valor, celdasAfectadas, banderasColocadas } = restriccion;
@@ -628,7 +663,8 @@ const identificarCeldasSeguras = (modeloTablero) => {
                         fila: c.fila,
                         columna: c.columna,
                         origen: 'análisis simple',
-                        celdaOrigen: celda
+                        celdaOrigen: celda,
+                        prioridad: 'media' // Prioridad media
                     });
                     // Actualizar modelo
                     estadoCeldas[c.fila][c.columna].esSegura = true;
@@ -638,28 +674,40 @@ const identificarCeldasSeguras = (modeloTablero) => {
         }
     });
     
-    // 2. ANÁLISIS DE SUBCONJUNTOS
-    // Buscar casos donde podemos deducir celdas seguras por diferencia de conjuntos
+    // ANÁLISIS DE SUBCONJUNTOS: Buscar celdas seguras mediante análisis de subconjuntos
     const celdasSegurasSubconjuntos = analizarSubconjuntosParaSeguras(modeloTablero);
     celdasSegurasSubconjuntos.forEach(segura => {
         if (!celdasSeguras.some(s => s.fila === segura.fila && s.columna === segura.columna)) {
-            celdasSeguras.push(segura);
+            celdasSeguras.push({
+                ...segura,
+                prioridad: 'media' // Prioridad media
+            });
             // Actualizar modelo
             estadoCeldas[segura.fila][segura.columna].esSegura = true;
             estadoCeldas[segura.fila][segura.columna].probabilidadMina = 0;
         }
     });
     
-    // 3. ANÁLISIS DE PATRONES ESPECÍFICOS
-    // Buscar patrones como 1-2-1, etc. que revelen celdas seguras
+    // ANÁLISIS DE PATRONES: Buscar celdas seguras mediante patrones específicos (como 1-2-1)
     const celdasSegurasPatrones = detectarPatronesParaSeguras(modeloTablero);
     celdasSegurasPatrones.forEach(segura => {
-        if (!celdasSeguras.some(s => s.fila === segura.fila && s.columna === segura.columna)) {
-            celdasSeguras.push(segura);
+        if (!celdasSeguras.some(s => s.fila === segura.fila && s.columna === s.columna)) {
+            celdasSeguras.push({
+                ...segura,
+                prioridad: 'baja' // Prioridad baja
+            });
             // Actualizar modelo
             estadoCeldas[segura.fila][segura.columna].esSegura = true;
             estadoCeldas[segura.fila][segura.columna].probabilidadMina = 0;
         }
+    });
+    
+    // Ordenar celdas seguras por prioridad (primero las de alta prioridad)
+    // Esto garantiza que exploremos primero las celdas adyacentes a ceros
+    celdasSeguras.sort((a, b) => {
+        const prioridadA = a.prioridad === 'alta' ? 0 : (a.prioridad === 'media' ? 1 : 2);
+        const prioridadB = b.prioridad === 'alta' ? 0 : (b.prioridad === 'media' ? 1 : 2);
+        return prioridadA - prioridadB;
     });
     
     return celdasSeguras;
@@ -667,10 +715,11 @@ const identificarCeldasSeguras = (modeloTablero) => {
 
 /**
  * Calcula probabilidades de mina para todas las celdas sin descubrir
+ * Versión mejorada para manejar todos los números del 0 al 8
  * @param {object} modeloTablero - Modelo completo del tablero
  * @returns {object} - Mapa de probabilidades para cada celda
  */
-const calcularProbabilidadesGlobales = (modeloTablero) => {
+export const calcularProbabilidadesGlobales = (modeloTablero) => {
     const { estadoCeldas, restricciones, tamañoTablero } = modeloTablero;
     const { filas, columnas } = tamañoTablero;
     const mapaProbabilidades = {};
@@ -686,9 +735,9 @@ const calcularProbabilidadesGlobales = (modeloTablero) => {
                 continue;
             }
             
-            // Probabilidad base conservadora
+            // Probabilidad base conservadora más baja para favorecer exploración
             mapaProbabilidades[clave] = {
-                probabilidad: 0.15, // Valor conservador por defecto
+                probabilidad: 0.1,
                 certeza: false,
                 origen: 'valor base'
             };
@@ -697,7 +746,8 @@ const calcularProbabilidadesGlobales = (modeloTablero) => {
     
     // 2. Actualizar probabilidades según restricciones locales
     restricciones.forEach(restriccion => {
-        const { celdasAfectadas, minasFaltantes } = restriccion;
+        const { celda, celdasAfectadas, minasFaltantes } = restriccion;
+        const valorNumerico = parseInt(estadoCeldas[celda.fila][celda.columna].valor);
         
         // Solo calcular si hay celdas afectadas y minas faltantes
         if (celdasAfectadas.length > 0 && minasFaltantes >= 0) {
@@ -714,27 +764,106 @@ const calcularProbabilidadesGlobales = (modeloTablero) => {
             const probabilidadRestricccion = celdasRelevantes.length > 0 ? 
                 minasFaltantes / celdasRelevantes.length : 0;
             
+            // MEJORADO: Factor de ajuste dinámico según el valor numérico (0-8)
+            let factorAjuste = 1.0;
+            
+            // Los valores más altos indican mayor concentración de minas en la zona
+            if (valorNumerico === 0) {
+                factorAjuste = 0; // Celdas adyacentes a 0 siempre son seguras
+            } else if (valorNumerico === 1) {
+                factorAjuste = 1.0; // Probabilidad normal
+            } else if (valorNumerico === 2) {
+                factorAjuste = 1.1; // Ligero incremento
+            } else if (valorNumerico === 3) {
+                factorAjuste = 1.2; // Mayor incremento
+            } else if (valorNumerico === 4) {
+                factorAjuste = 1.3; // Incremento significativo
+            } else if (valorNumerico >= 5) {
+                factorAjuste = 1.4; // Incremento muy significativo
+            }
+            
             // Actualizar mapa de probabilidades
             celdasRelevantes.forEach(c => {
                 const clave = `${c.fila},${c.columna}`;
                 
-                // Si la celda ya tiene una probabilidad asignada, tomamos la más alta
-                // (enfoque conservador = más peligroso)
-                if (!mapaProbabilidades[clave] || mapaProbabilidades[clave].probabilidad < probabilidadRestricccion) {
+                // Si valorNumerico es 0, siempre asignar probabilidad 0
+                if (valorNumerico === 0) {
                     mapaProbabilidades[clave] = {
-                        probabilidad: probabilidadRestricccion,
+                        probabilidad: 0,
+                        certeza: true,
+                        origen: `adyacente a cero en (${celda.fila+1},${celda.columna+1})`
+                    };
+                    return;
+                }
+                
+                // Aplicar factor de ajuste
+                const probabilidadAjustada = probabilidadRestricccion * factorAjuste;
+                
+                // Si la celda ya tiene una probabilidad asignada, tomamos la más alta
+                if (!mapaProbabilidades[clave] || mapaProbabilidades[clave].probabilidad < probabilidadAjustada) {
+                    mapaProbabilidades[clave] = {
+                        probabilidad: probabilidadAjustada,
                         certeza: false,
-                        origen: `restricción de celda (${restriccion.celda.fila+1},${restriccion.celda.columna+1})`
+                        origen: `restricción de ${valorNumerico} en (${restriccion.celda.fila+1},${restriccion.celda.columna+1})`
                     };
                 }
             });
         }
     });
     
-    // 3. Reducir probabilidades para celdas aisladas (lejos de números)
+    // 3. Ajuste adicional para celdas adyacentes a números
+    for (let i = 0; i < filas; i++) {
+        for (let j = 0; j < columnas; j++) {
+            const clave = `${i},${j}`;
+            
+            // Si la celda no está en el mapa, continuar
+            if (!mapaProbabilidades[clave]) continue;
+            
+            // Verificar si es adyacente a algún número > 0
+            const celdasAdyacentes = obtenerCeldasAdyacentes(i, j, tamañoTablero);
+            
+            // Buscar el número más alto adyacente (más relevante para determinar riesgo)
+            let maxValorAdyacente = 0;
+            let contieneNumeroAlto = false;
+            
+            celdasAdyacentes.forEach(adj => {
+                if (estadoCeldas[adj.fila][adj.columna].descubierta) {
+                    const valorAdj = estadoCeldas[adj.fila][adj.columna].valor;
+                    if (valorAdj !== '' && valorAdj !== 'M' && !isNaN(valorAdj)) {
+                        const numValor = parseInt(valorAdj);
+                        if (numValor > maxValorAdyacente) {
+                            maxValorAdyacente = numValor;
+                        }
+                        
+                        // Considerar números 4-8 como "altos"
+                        if (numValor >= 4) {
+                            contieneNumeroAlto = true;
+                        }
+                    }
+                }
+            });
+            
+            // Si es adyacente a un número > 0, ajustar su probabilidad
+            if (maxValorAdyacente > 0) {
+                // Escala de ajuste basada en el máximo valor adyacente
+                let factorAjuste = 1 + (maxValorAdyacente * 0.1); // 10% por cada unidad
+                
+                // Bonus para números muy altos (indican alta concentración de minas)
+                if (contieneNumeroAlto) {
+                    factorAjuste += 0.1; // Bonus adicional
+                }
+                
+                mapaProbabilidades[clave].probabilidad *= factorAjuste;
+                mapaProbabilidades[clave].probabilidad = Math.min(0.95, mapaProbabilidades[clave].probabilidad);
+                mapaProbabilidades[clave].origen += ` | adyacente a ${maxValorAdyacente}`;
+            }
+        }
+    }
+    
+    // 4. Reducir probabilidades para celdas aisladas (lejos de números)
     reducirProbabilidadesCeldasAisladas(modeloTablero, mapaProbabilidades);
     
-    // 4. Ajustar probabilidades según patrones globales
+    // 5. Ajustar probabilidades según patrones globales
     ajustarProbabilidadesSegunPatrones(modeloTablero, mapaProbabilidades);
     
     return mapaProbabilidades;
@@ -912,6 +1041,7 @@ const enriquecerMapaProbabilidades = (mapaProbabilidades, memoriaJuego, tamañoT
 
 /**
  * Determina la mejor jugada utilizando un enfoque basado en capas
+ * Mejorado para trabajar con todos los números del 0-8 y priorizar celdas seguras
  * @param {object} modeloTablero - Modelo del tablero
  * @param {object} mapaProbabilidades - Mapa de probabilidades
  * @param {Array} celdasSeguras - Celdas identificadas como seguras
@@ -920,7 +1050,7 @@ const enriquecerMapaProbabilidades = (mapaProbabilidades, memoriaJuego, tamañoT
  * @param {object} tamañoTablero - Tamaño del tablero
  * @returns {object} - Mejor celda para seleccionar
  */
-const determinarMejorJugadaEnCapas = (
+export const determinarMejorJugadaEnCapas = (
     modeloTablero, 
     mapaProbabilidades, 
     celdasSeguras, 
@@ -928,11 +1058,52 @@ const determinarMejorJugadaEnCapas = (
     memoriaJuego,
     tamañoTablero
 ) => {
-    // CAPA 1: SEGURIDAD ABSOLUTA
-    // Si hay celdas 100% seguras, seleccionar una de ellas
+    // CAPA 1: SEGURIDAD ABSOLUTA - CELDAS ADYACENTES A CEROS
+    // Priorizar celdas adyacentes a ceros ya que tienen 0% de probabilidad de mina
     if (celdasSeguras.length > 0) {
-        // Elegir la celda segura que esté más cerca del último movimiento
-        // para mantener una estrategia de exploración por áreas
+        // Primero, buscar celdas seguras que sean adyacentes a ceros
+        const celdasAdyacentesACero = celdasSeguras.filter(
+            celda => celda.origen === 'adyacente a cero'
+        );
+        
+        // Si hay celdas adyacentes a ceros, priorizar esas
+        if (celdasAdyacentesACero.length > 0) {
+            // Elegir la celda segura que esté más cerca del último movimiento
+            let mejorCeldaSegura = celdasAdyacentesACero[0];
+            let distanciaMinima = Number.MAX_SAFE_INTEGER;
+            
+            // Si hay movimientos previos, buscar la celda segura más cercana al último
+            if (historialMovimientos.length > 0) {
+                // Filtrar solo las selecciones (no banderas)
+                const selecciones = historialMovimientos.filter(mov => !mov.esAccion);
+                
+                if (selecciones.length > 0) {
+                    const ultimaSeleccion = selecciones[selecciones.length - 1];
+                    
+                    celdasAdyacentesACero.forEach(celda => {
+                        const distancia = distanciaManhattan(
+                            celda.fila, celda.columna, 
+                            ultimaSeleccion.fila, ultimaSeleccion.columna
+                        );
+                        
+                        if (distancia < distanciaMinima) {
+                            distanciaMinima = distancia;
+                            mejorCeldaSegura = celda;
+                        }
+                    });
+                }
+            }
+            
+            return {
+                fila: mejorCeldaSegura.fila,
+                columna: mejorCeldaSegura.columna,
+                tipoAnalisis: 'celda 100% segura (adyacente a cero)',
+                origen: mejorCeldaSegura.origen
+            };
+        }
+        
+        // CAPA 1B: OTRAS CELDAS SEGURAS
+        // Si no hay celdas adyacentes a ceros, usar cualquier celda segura
         let mejorCeldaSegura = celdasSeguras[0];
         let distanciaMinima = Number.MAX_SAFE_INTEGER;
         
@@ -999,30 +1170,77 @@ const determinarMejorJugadaEnCapas = (
         );
     }
     
-    // CAPA 3: ESTRATEGIA DE FRONTERA
-    // Dividir candidatas en celdas de frontera (adyacentes a descubiertas) y no frontera
-    const celdasFrontera = [];
-    const celdasNoFrontera = [];
+    // CAPA 2B: CELDAS MUY SEGURAS (menos de 5% de probabilidad)
+    // Identificar celdas con probabilidad muy baja que pueden considerarse seguras
+    const celdasMuySeguras = celdasCandidatas.filter(c => c.probabilidad < 0.05);
+    if (celdasMuySeguras.length > 0) {
+        // Ordenar por probabilidad ascendente (menor primero)
+        celdasMuySeguras.sort((a, b) => a.probabilidad - b.probabilidad);
+        // Elegir la celda con menor probabilidad
+        return {
+            fila: celdasMuySeguras[0].fila,
+            columna: celdasMuySeguras[0].columna,
+            tipoAnalisis: `probabilidad muy baja ${Math.round(celdasMuySeguras[0].probabilidad * 100)}%`,
+            origen: celdasMuySeguras[0].origen,
+            razonamientoMemoria: celdasMuySeguras[0].razonamientoMemoria
+        };
+    }
     
+    // CAPA 3: ANÁLISIS POR NÚMEROS ADYACENTES
+    // Clasificar las celdas según los números adyacentes
     celdasCandidatas.forEach(celda => {
         const { fila, columna } = celda;
         const celdasAdyacentes = obtenerCeldasAdyacentes(fila, columna, tamañoTablero);
         
-        // Verificar si alguna celda adyacente está descubierta
-        const tieneAdyacenteDescubierta = celdasAdyacentes.some(adj => 
-            modeloTablero.celdasDescubiertas.some(desc => 
-                desc.fila === adj.fila && desc.columna === adj.columna
-            )
-        );
+        // MEJORA: Análisis completo de todos los números adyacentes (del 0 al 8)
+        let maxNumeroAdyacente = -1;
+        let esAdyacenteAlto = false;
         
-        if (tieneAdyacenteDescubierta) {
-            celdasFrontera.push(celda);
-        } else {
-            celdasNoFrontera.push(celda);
+        celdasAdyacentes.forEach(adj => {
+            if (modeloTablero.celdasDescubiertas.some(desc => 
+                desc.fila === adj.fila && desc.columna === adj.columna
+            )) {
+                const valor = modeloTablero.estadoCeldas[adj.fila][adj.columna].valor;
+                if (valor !== '' && valor !== 'M' && !isNaN(valor)) {
+                    const numValor = parseInt(valor);
+                    maxNumeroAdyacente = Math.max(maxNumeroAdyacente, numValor);
+                    
+                    // Números 4-8 son considerados de alto riesgo
+                    if (numValor >= 4) {
+                        esAdyacenteAlto = true;
+                    }
+                }
+            }
+        });
+        
+        // Asignar propiedades de análisis numérico a la celda
+        celda.maxNumeroAdyacente = maxNumeroAdyacente;
+        celda.esAdyacenteAlto = esAdyacenteAlto;
+        
+        // Ajustar la probabilidad según los números adyacentes
+        if (maxNumeroAdyacente >= 0) {
+            // Escala basada en el valor máximo adyacente
+            if (maxNumeroAdyacente === 0) {
+                celda.probabilidad = 0; // Adyacente a 0 es siempre seguro
+            } else {
+                const factorRiesgo = 1 + (maxNumeroAdyacente * 0.1);
+                celda.probabilidad *= factorRiesgo;
+                
+                // Bonus para números muy altos
+                if (esAdyacenteAlto) {
+                    celda.probabilidad *= 1.1;
+                }
+                
+                celda.probabilidad = Math.min(0.95, celda.probabilidad);
+            }
         }
     });
     
-    // CAPA 4: ANÁLISIS POR TIPO DE CELDA Y PROGRESIÓN DEL JUEGO
+    // Dividir en celdas de frontera (adyacentes a descubiertas) y no frontera
+    const celdasFrontera = celdasCandidatas.filter(c => c.maxNumeroAdyacente >= 0);
+    const celdasNoFrontera = celdasCandidatas.filter(c => c.maxNumeroAdyacente === -1);
+    
+    // CAPA 4: ESTRATEGIA SEGÚN ETAPA DEL JUEGO
     // Determinar la etapa del juego basada en el porcentaje de celdas descubiertas
     const totalCeldas = tamañoTablero.filas * tamañoTablero.columnas;
     const porcentajeDescubierto = (modeloTablero.celdasDescubiertas.length / totalCeldas) * 100;
@@ -1031,8 +1249,11 @@ const determinarMejorJugadaEnCapas = (
     
     // Inicio del juego: Favorecer exploración en áreas distintas
     if (porcentajeDescubierto < 15) {
-        // Ordenar celdas por probabilidad ascendente (menor primero)
-        const celdasSeguras = celdasCandidatas.filter(c => c.probabilidad < 0.15);
+        // Priorizar celdas con bajo valor numérico adyacente (0-1)
+        const celdasSeguras = celdasCandidatas.filter(c => 
+            (c.maxNumeroAdyacente === -1 || c.maxNumeroAdyacente <= 1) && 
+            c.probabilidad < 0.15
+        );
         
         if (celdasSeguras.length > 0) {
             // Al inicio, diversificar la exploración seleccionando celdas lejos de movimientos anteriores
@@ -1069,12 +1290,26 @@ const determinarMejorJugadaEnCapas = (
     }
     // Mitad del juego: Priorizar celdas de frontera con baja probabilidad
     else if (porcentajeDescubierto < 50) {
-        if (celdasFrontera.length > 0) {
-            // Ordenar por probabilidad ascendente
-            celdasFrontera.sort((a, b) => a.probabilidad - b.probabilidad);
+        // Filtrar celdas de frontera con bajo riesgo (no adyacentes a números altos)
+        const celdasFronteraSeguras = celdasFrontera.filter(c => !c.esAdyacenteAlto);
+        
+        if (celdasFronteraSeguras.length > 0) {
+            // Ordenar por valor numérico adyacente (menor primero) y luego por probabilidad
+            celdasFronteraSeguras.sort((a, b) => {
+                // Primero por valor numérico adyacente
+                if (a.maxNumeroAdyacente !== b.maxNumeroAdyacente) {
+                    return a.maxNumeroAdyacente - b.maxNumeroAdyacente;
+                }
+                // Luego por probabilidad
+                return a.probabilidad - b.probabilidad;
+            });
             
             // Seleccionar la mejor candidata de frontera
-            celdaSeleccionada = celdasFrontera[0];
+            celdaSeleccionada = celdasFronteraSeguras[0];
+        } else if (celdasNoFrontera.length > 0) {
+            // Si no hay celdas de frontera seguras, usar celdas no frontera
+            celdasNoFrontera.sort((a, b) => a.probabilidad - b.probabilidad);
+            celdaSeleccionada = celdasNoFrontera[0];
         }
     }
     // Final del juego: Análisis más conservador
@@ -1091,22 +1326,13 @@ const determinarMejorJugadaEnCapas = (
         // Ordenar por probabilidad ascendente
         celdasCandidatas.sort((a, b) => a.probabilidad - b.probabilidad);
         
-        // Filtrar para evitar repetir celdas recientes
-        const ultimasSelecciones = historialMovimientos
-            .filter(mov => !mov.esAccion) // Solo selecciones, no banderas
-            .slice(-5) // Últimas 5 selecciones
-            .map(mov => ({ fila: mov.fila, columna: mov.columna }));
+        // Priorizar celdas no adyacentes a números altos (4-8)
+        const celdasNoAdyacentesAlto = celdasCandidatas.filter(c => !c.esAdyacenteAlto);
         
-        // Filtrar celdas que no estén en últimas selecciones
-        const celdasNoRepetidas = celdasCandidatas.filter(c => 
-            !ultimasSelecciones.some(s => s.fila === c.fila && s.columna === c.columna)
-        );
-        
-        // Si hay celdas no repetidas, usar esas
-        if (celdasNoRepetidas.length > 0) {
-            celdaSeleccionada = celdasNoRepetidas[0];
+        if (celdasNoAdyacentesAlto.length > 0) {
+            celdaSeleccionada = celdasNoAdyacentesAlto[0];
         } else {
-            // Si todas las celdas disponibles ya fueron seleccionadas recientemente
+            // Si todas están adyacentes a números altos, elegir la de menor probabilidad
             celdaSeleccionada = celdasCandidatas[0];
         }
     }

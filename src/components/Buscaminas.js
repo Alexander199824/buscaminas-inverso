@@ -10,9 +10,14 @@ import {
     seleccionarPrimeraCeldaSegura,
     analizarTablero,
     obtenerCeldasAdyacentes,
-    aprenderDeDerrota
+    aprenderDeDerrota,
+    distanciaManhattan
 } from '../utils/logicaJuego';
-import { verificarConsistenciaRespuesta, verificarConsistenciaGlobal } from '../utils/validacionLogica';
+import { 
+    verificarConsistenciaRespuesta, 
+    verificarConsistenciaGlobal,
+    verificarPosiblesInconsistenciasFuturas
+} from '../utils/validacionLogica';
 import {
     inicializarMemoria,
     guardarMemoria,
@@ -367,73 +372,6 @@ const Buscaminas = () => {
         }
     };
 
-    // Aplicar una respuesta a pesar de la inconsistencia
-    const aplicarRespuestaConInconsistencia = () => {
-        if (!inconsistenciaDetectada || !celdaActual) return;
-
-        // Verificar si es una inconsistencia crítica que no se puede ignorar
-        if (inconsistenciaDetectada.contradicciones &&
-            inconsistenciaDetectada.contradicciones.length > 0 &&
-            (inconsistenciaDetectada.contradicciones[0].tipo === 'exceso_minas' ||
-                inconsistenciaDetectada.contradicciones[0].tipo === 'exceso_banderas')) {
-            // No permitir continuar con errores críticos
-            setMostrarAdvertencia(false);
-            return;
-        }
-
-        // Continuar con la respuesta a pesar de la inconsistencia
-        const { fila, columna } = celdaActual;
-        const tipo = tipoRespuesta;
-
-        // Actualizar tablero
-        const nuevoTablero = [...tablero];
-        if (tipo === 'vacío') {
-            nuevoTablero[fila][columna] = '';
-        } else if (tipo === 'mina') {
-            nuevoTablero[fila][columna] = 'M';
-        } else {
-            nuevoTablero[fila][columna] = tipo;
-        }
-
-        // Actualizar estado
-        setTablero(nuevoTablero);
-        setCeldasDescubiertas([...celdasDescubiertas, { fila, columna }]);
-        setHistorialMovimientos([...historialMovimientos, {
-            fila,
-            columna,
-            contenido: tipo,
-            inconsistente: true
-        }]);
-
-        // Actualizar el stateRef
-        stateRef.current = {
-            ...stateRef.current,
-            tablero: nuevoTablero,
-            celdasDescubiertas: [...celdasDescubiertas, { fila, columna }],
-            historialMovimientos: [...historialMovimientos, {
-                fila,
-                columna,
-                contenido: tipo,
-                inconsistente: true
-            }]
-        };
-
-        // Limpiar estado de inconsistencia
-        setInconsistenciaDetectada(null);
-        setMostrarAdvertencia(false);
-
-        // Continuar con el juego
-        setEsperandoRespuesta(false);
-        stateRef.current.esperandoRespuesta = false;
-
-        setAnimacion('respuesta');
-        setTimeout(() => {
-            if (!stateRef.current.esperandoRespuesta && !stateRef.current.juegoTerminado) {
-                realizarAnalisisTablero();
-            }
-        }, 1000);
-    };
-
     // Respuesta del usuario sobre el contenido de la celda
     const responderContenidoCelda = (tipo) => {
         try {
@@ -445,7 +383,34 @@ const Buscaminas = () => {
             const { fila, columna } = celdaActual;
             setTipoRespuesta(tipo);
 
-            // Verificar la consistencia lógica de la respuesta
+            // Primera etapa - verificar si hay posibles inconsistencias futuras (advertencia preventiva)
+            const advertenciasFuturas = verificarPosiblesInconsistenciasFuturas(
+                fila,
+                columna,
+                tipo,
+                tablero,
+                celdasDescubiertas,
+                banderas,
+                tamañoSeleccionado
+            );
+
+            // Si hay advertencias futuras, mostrarlas primero (pero son solo advertencias)
+            if (advertenciasFuturas.hayAdvertencia) {
+                // Mostrar advertencia pero permitir continuar
+                setInconsistenciaDetectada({
+                    esConsistente: false,
+                    mensaje: advertenciasFuturas.mensaje,
+                    contradicciones: [{ 
+                        tipo: 'advertencia_preventiva', 
+                        mensaje: advertenciasFuturas.mensaje 
+                    }],
+                    esPreventiva: true
+                });
+                setMostrarAdvertencia(true);
+                return; // Detenerse aquí, esperar respuesta del usuario
+            }
+
+            // Segunda etapa - verificar la consistencia lógica de la respuesta
             const resultadoValidacion = verificarConsistenciaRespuesta(
                 fila,
                 columna,
@@ -462,7 +427,11 @@ const Buscaminas = () => {
 
                 // Determinar si es una inconsistencia crítica
                 const esInconsistenciaCritica = resultadoValidacion.contradicciones.some(
-                    c => c.tipo === 'exceso_minas' || c.tipo === 'exceso_banderas'
+                    c => c.tipo === 'exceso_minas' || 
+                         c.tipo === 'exceso_banderas' ||
+                         c.tipo === 'exceso_minas_global' ||
+                         c.tipo === 'exceso_banderas_global' ||
+                         c.tipo === 'exceso_minas_para_numero'
                 );
 
                 if (esInconsistenciaCritica) {
@@ -565,12 +534,44 @@ const Buscaminas = () => {
 
                 setAnimacion('respuesta');
 
-                // Analizar el tablero para buscar nuevos patrones
-                setTimeout(() => {
-                    if (!stateRef.current.juegoTerminado) {
-                        realizarAnalisisTablero();
+                // Si es un cero, revelar automáticamente todas las celdas adyacentes
+                if (tipo === '0' || tipo === 'vacío') {
+                    // Obtener todas las celdas adyacentes
+                    const celdasAdyacentes = obtenerCeldasAdyacentes(fila, columna, tamañoSeleccionado);
+                    
+                    // Filtrar solo las que no están descubiertas ni tienen bandera
+                    const celdasADescubrir = celdasAdyacentes.filter(c => 
+                        !nuevasCeldasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna) &&
+                        !banderas.some(b => b.fila === c.fila && b.columna === c.columna)
+                    );
+                    
+                    if (celdasADescubrir.length > 0) {
+                        // Mensaje especial para indicar que se revelarán automáticamente celdas adyacentes
+                        setMensajeSistema(`La celda es un ${tipo === '0' ? '0' : 'vacío'}, todas las celdas adyacentes son seguras.`);
+                        
+                        // Dar tiempo para que se actualice la interfaz antes de revelar
+                        setTimeout(() => {
+                            if (!stateRef.current.juegoTerminado) {
+                                // Seleccionar la primera celda adyacente automáticamente
+                                seleccionarCelda(celdasADescubrir[0].fila, celdasADescubrir[0].columna);
+                            }
+                        }, 1000);
+                    } else {
+                        // Si no hay celdas adyacentes para descubrir, continuar análisis normal
+                        setTimeout(() => {
+                            if (!stateRef.current.juegoTerminado) {
+                                realizarAnalisisTablero();
+                            }
+                        }, 1000);
                     }
-                }, 1000);
+                } else {
+                    // Para otros valores, seguir con el análisis normal
+                    setTimeout(() => {
+                        if (!stateRef.current.juegoTerminado) {
+                            realizarAnalisisTablero();
+                        }
+                    }, 1000);
+                }
             }
         } catch (error) {
             console.error("Error al responder contenido de celda:", error);
@@ -578,6 +579,107 @@ const Buscaminas = () => {
             // Restablecer estado en caso de error
             setEsperandoRespuesta(false);
             stateRef.current.esperandoRespuesta = false;
+        }
+    };
+
+    // Aplicar una respuesta a pesar de la inconsistencia
+    const aplicarRespuestaConInconsistencia = () => {
+        if (!inconsistenciaDetectada || !celdaActual) return;
+
+        // Si es una advertencia preventiva, continuar con menos restricciones
+        const esAdvertenciaPreventiva = inconsistenciaDetectada.esPreventiva;
+
+        // Verificar si es una inconsistencia crítica que no se puede ignorar
+        if (!esAdvertenciaPreventiva && inconsistenciaDetectada.contradicciones &&
+            inconsistenciaDetectada.contradicciones.length > 0 &&
+            (inconsistenciaDetectada.contradicciones[0].tipo === 'exceso_minas' ||
+             inconsistenciaDetectada.contradicciones[0].tipo === 'exceso_banderas' ||
+             inconsistenciaDetectada.contradicciones[0].tipo === 'exceso_minas_global' ||
+             inconsistenciaDetectada.contradicciones[0].tipo === 'exceso_banderas_global' ||
+             inconsistenciaDetectada.contradicciones[0].tipo === 'exceso_minas_para_numero')) {
+            // No permitir continuar con errores críticos
+            setMostrarAdvertencia(false);
+            return;
+        }
+
+        // Continuar con la respuesta a pesar de la inconsistencia o advertencia
+        const { fila, columna } = celdaActual;
+        const tipo = tipoRespuesta;
+
+        // Actualizar tablero
+        const nuevoTablero = [...tablero];
+        if (tipo === 'vacío') {
+            nuevoTablero[fila][columna] = '';
+        } else if (tipo === 'mina') {
+            nuevoTablero[fila][columna] = 'M';
+        } else {
+            nuevoTablero[fila][columna] = tipo;
+        }
+
+        // Actualizar estado
+        setTablero(nuevoTablero);
+        setCeldasDescubiertas([...celdasDescubiertas, { fila, columna }]);
+        setHistorialMovimientos([...historialMovimientos, {
+            fila,
+            columna,
+            contenido: tipo,
+            inconsistente: !esAdvertenciaPreventiva // Marcar como inconsistente solo si no es advertencia preventiva
+        }]);
+
+        // Actualizar el stateRef
+        stateRef.current = {
+            ...stateRef.current,
+            tablero: nuevoTablero,
+            celdasDescubiertas: [...celdasDescubiertas, { fila, columna }],
+            historialMovimientos: [...historialMovimientos, {
+                fila,
+                columna,
+                contenido: tipo,
+                inconsistente: !esAdvertenciaPreventiva
+            }]
+        };
+
+        // Limpiar estado de inconsistencia
+        setInconsistenciaDetectada(null);
+        setMostrarAdvertencia(false);
+
+        // Continuar con el juego
+        setEsperandoRespuesta(false);
+        stateRef.current.esperandoRespuesta = false;
+
+        setAnimacion('respuesta');
+        
+        // Si es un cero, revelar automáticamente todas las celdas adyacentes
+        if (tipo === '0' || tipo === 'vacío') {
+            // Obtener todas las celdas adyacentes
+            const celdasAdyacentes = obtenerCeldasAdyacentes(fila, columna, tamañoSeleccionado);
+            
+            // Filtrar solo las que no están descubiertas ni tienen bandera
+            const celdasADescubrir = celdasAdyacentes.filter(c => 
+                !celdasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna) &&
+                !banderas.some(b => b.fila === c.fila && b.columna === c.columna)
+            );
+            
+            if (celdasADescubrir.length > 0) {
+                setTimeout(() => {
+                    if (!stateRef.current.esperandoRespuesta && !stateRef.current.juegoTerminado) {
+                        // Seleccionar la primera celda adyacente automáticamente
+                        seleccionarCelda(celdasADescubrir[0].fila, celdasADescubrir[0].columna);
+                    }
+                }, 1000);
+            } else {
+                setTimeout(() => {
+                    if (!stateRef.current.esperandoRespuesta && !stateRef.current.juegoTerminado) {
+                        realizarAnalisisTablero();
+                    }
+                }, 1000);
+            }
+        } else {
+            setTimeout(() => {
+                if (!stateRef.current.esperandoRespuesta && !stateRef.current.juegoTerminado) {
+                    realizarAnalisisTablero();
+                }
+            }, 1000);
         }
     };
 
