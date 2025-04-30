@@ -586,19 +586,26 @@ const crearModeloTablero = (tablero, tamañoTablero, celdasDescubiertas, bandera
 };
 
 /**
- * Identifica todas las banderas que se pueden colocar con certeza
+ * Identifica todas las banderas que se pueden colocar con certeza, mejorado para evitar contradicciones
  * @param {object} modeloTablero - Modelo completo del tablero
  * @returns {Array} - Lista de nuevas banderas a colocar
  */
 const identificarTodasLasBanderas = (modeloTablero) => {
-    const { restricciones, estadoCeldas, banderas } = modeloTablero;
+    const { restricciones, estadoCeldas, banderas, tamañoTablero } = modeloTablero;
     const nuevasBanderas = [];
+    
+    console.log("===== ANÁLISIS DETALLADO DE BANDERAS =====");
     
     // 1. ANÁLISIS SIMPLE: Si una restricción tiene exactamente tantas celdas sin descubrir
     // como minas faltantes, todas esas celdas son minas
-    restricciones.forEach(restriccion => {
+    console.log("PASO 1: Análisis simple de restricciones");
+    restricciones.forEach((restriccion, index) => {
         const { celda, valor, celdasAfectadas, banderasColocadas } = restriccion;
         const minasFaltantes = valor - banderasColocadas;
+        
+        console.log(`Analizando celda (${celda.fila + 1},${celda.columna + 1}) con valor ${valor}:`);
+        console.log(`- Banderas colocadas: ${banderasColocadas}`);
+        console.log(`- Minas faltantes: ${minasFaltantes}`);
         
         // Filtrar celdas sin descubrir y sin bandera
         const celdasSinDescubrirSinBandera = celdasAfectadas.filter(c => 
@@ -608,36 +615,64 @@ const identificarTodasLasBanderas = (modeloTablero) => {
             !nuevasBanderas.some(b => b.fila === c.fila && b.columna === c.columna)
         );
         
+        console.log(`- Celdas sin descubrir/sin bandera: ${celdasSinDescubrirSinBandera.length}`);
+        
         // Si el número de celdas sin descubrir es igual a las minas faltantes,
         // todas son minas (y podemos colocar banderas)
         if (celdasSinDescubrirSinBandera.length === minasFaltantes && minasFaltantes > 0) {
+            console.log(`🚩 ¡COINCIDENCIA EXACTA! Todas las celdas sin descubrir son minas`);
+            
+            // Verificar contradicción con otras restricciones antes de colocar banderas
+            let hayContradiccion = false;
             celdasSinDescubrirSinBandera.forEach(c => {
-                if (!nuevasBanderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
-                    nuevasBanderas.push({
-                        fila: c.fila,
-                        columna: c.columna,
-                        origen: 'análisis simple',
-                        celdaOrigen: celda,
-                        detalle: `La celda (${celda.fila + 1},${celda.columna + 1}) con valor ${valor} necesita exactamente ${minasFaltantes} minas y hay ${celdasSinDescubrirSinBandera.length} celdas sin descubrir.`
-                    });
-                    // Actualizar modelo
-                    estadoCeldas[c.fila][c.columna].tieneBandera = true;
-                    estadoCeldas[c.fila][c.columna].probabilidadMina = 1;
+                // Verificar cada celda con todas las demás restricciones
+                if (verificarContradiccionConOtrasRestricciones(c, restriccion, restricciones, estadoCeldas)) {
+                    hayContradiccion = true;
+                    console.log(`⚠️ CONTRADICCIÓN DETECTADA: No se puede colocar bandera en (${c.fila + 1},${c.columna + 1}) porque contradice otras restricciones`);
                 }
             });
+            
+            if (hayContradiccion) {
+                console.log(`⛔ Omitiendo banderas debido a contradicciones`);
+            } else {
+                celdasSinDescubrirSinBandera.forEach(c => {
+                    if (!nuevasBanderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
+                        console.log(`✅ Colocando bandera en (${c.fila + 1},${c.columna + 1})`);
+                        nuevasBanderas.push({
+                            fila: c.fila,
+                            columna: c.columna,
+                            origen: 'análisis simple',
+                            celdaOrigen: celda,
+                            detalle: `La celda (${celda.fila + 1},${celda.columna + 1}) con valor ${valor} necesita exactamente ${minasFaltantes} minas y hay ${celdasSinDescubrirSinBandera.length} celdas sin descubrir.`
+                        });
+                        
+                        // Actualizar modelo para próximas comprobaciones
+                        estadoCeldas[c.fila][c.columna].tieneBandera = true;
+                        estadoCeldas[c.fila][c.columna].probabilidadMina = 1;
+                    }
+                });
+            }
+        } else if (celdasSinDescubrirSinBandera.length < minasFaltantes) {
+            console.log(`⚠️ POSIBLE ERROR: Faltan celdas para colocar todas las minas necesarias`);
+        } else {
+            console.log(`ℹ️ No hay información suficiente para determinar banderas con este análisis`);
         }
     });
     
     // 2. ANÁLISIS DE SUBCONJUNTOS
     // Buscar casos donde una restricción es subconjunto de otra
+    console.log("\nPASO 2: Análisis de subconjuntos");
     const nuevasBanderasSubconjuntos = analizarSubconjuntos(modeloTablero, nuevasBanderas);
     
     if (nuevasBanderasSubconjuntos.length > 0) {
         console.log(`- Encontradas ${nuevasBanderasSubconjuntos.length} banderas adicionales por análisis de subconjuntos`);
+    } else {
+        console.log(`- No se encontraron banderas adicionales por análisis de subconjuntos`);
     }
     
     nuevasBanderasSubconjuntos.forEach(bandera => {
         if (!nuevasBanderas.some(b => b.fila === bandera.fila && b.columna === bandera.columna)) {
+            console.log(`✅ Colocando bandera en (${bandera.fila + 1},${bandera.columna + 1}) por análisis de subconjuntos`);
             nuevasBanderas.push(bandera);
             // Actualizar modelo
             estadoCeldas[bandera.fila][bandera.columna].tieneBandera = true;
@@ -647,14 +682,18 @@ const identificarTodasLasBanderas = (modeloTablero) => {
     
     // 3. ANÁLISIS DE PATRONES ESPECÍFICOS
     // Buscar patrones como 1-2-1, etc.
+    console.log("\nPASO 3: Análisis de patrones específicos");
     const nuevasBanderasPatrones = detectarPatronesParaBanderas(modeloTablero, nuevasBanderas);
     
     if (nuevasBanderasPatrones.length > 0) {
         console.log(`- Encontradas ${nuevasBanderasPatrones.length} banderas adicionales por análisis de patrones`);
+    } else {
+        console.log(`- No se encontraron banderas adicionales por análisis de patrones`);
     }
     
     nuevasBanderasPatrones.forEach(bandera => {
         if (!nuevasBanderas.some(b => b.fila === bandera.fila && b.columna === bandera.columna)) {
+            console.log(`✅ Colocando bandera en (${bandera.fila + 1},${bandera.columna + 1}) por análisis de patrones`);
             nuevasBanderas.push(bandera);
             // Actualizar modelo
             estadoCeldas[bandera.fila][bandera.columna].tieneBandera = true;
@@ -662,7 +701,69 @@ const identificarTodasLasBanderas = (modeloTablero) => {
         }
     });
     
+    console.log(`\nRESULTADO FINAL: ${nuevasBanderas.length} banderas identificadas`);
+    nuevasBanderas.forEach((bandera, i) => {
+        console.log(`${i+1}. Bandera en (${bandera.fila + 1},${bandera.columna + 1}) - ${bandera.origen}`);
+    });
+    console.log("===== FIN DE ANÁLISIS DE BANDERAS =====");
+    
     return nuevasBanderas;
+};
+
+/**
+ * Verifica si colocar una bandera en una celda contradice otras restricciones
+ * @param {object} celda - Celda donde se quiere colocar bandera {fila, columna}
+ * @param {object} restriccionActual - Restricción que sugiere colocar la bandera
+ * @param {Array} todasRestricciones - Todas las restricciones del tablero
+ * @param {Array} estadoCeldas - Estado actual de todas las celdas
+ * @returns {boolean} - true si hay contradicción
+ */
+const verificarContradiccionConOtrasRestricciones = (celda, restriccionActual, todasRestricciones, estadoCeldas) => {
+    // Obtener todas las restricciones que afectan a esta celda (excepto la actual)
+    const restriccionesAfectadas = todasRestricciones.filter(r => 
+        (r.celda.fila !== restriccionActual.celda.fila || r.celda.columna !== restriccionActual.celda.columna) &&
+        r.celdasAfectadas.some(c => c.fila === celda.fila && c.columna === celda.columna)
+    );
+    
+    // Si no hay otras restricciones, no hay contradicción
+    if (restriccionesAfectadas.length === 0) {
+        console.log(`  ℹ️ La celda (${celda.fila + 1},${celda.columna + 1}) no está afectada por otras restricciones`);
+        return false;
+    }
+    
+    console.log(`  🔍 Verificando ${restriccionesAfectadas.length} restricciones adicionales que afectan a (${celda.fila + 1},${celda.columna + 1})`);
+    
+    // Verificar cada restricción afectada
+    for (const restriccion of restriccionesAfectadas) {
+        const { valor, banderasColocadas, celdasAfectadas } = restriccion;
+        const minasFaltantes = valor - banderasColocadas;
+        
+        // Contar cuántas celdas sin descubrir quedan en esta restricción (excluyendo la celda actual)
+        const celdasSinDescubrirRestantes = celdasAfectadas.filter(c => 
+            !estadoCeldas[c.fila][c.columna].descubierta && 
+            !estadoCeldas[c.fila][c.columna].tieneBandera &&
+            (c.fila !== celda.fila || c.columna !== celda.columna)
+        );
+        
+        console.log(`  • Restricción (${restriccion.celda.fila + 1},${restriccion.celda.columna + 1}) valor ${valor}:`);
+        console.log(`    - Minas faltantes: ${minasFaltantes}`);
+        console.log(`    - Celdas sin descubrir restantes (excluyendo candidata): ${celdasSinDescubrirRestantes.length}`);
+        
+        // Si al colocar esta bandera quedan más minas faltantes que celdas disponibles, hay contradicción
+        if (minasFaltantes - 1 > celdasSinDescubrirRestantes.length) {
+            console.log(`    ⛔ CONTRADICCIÓN: Quedarían ${minasFaltantes - 1} minas por colocar pero solo hay ${celdasSinDescubrirRestantes.length} celdas disponibles`);
+            return true;
+        }
+        
+        // Si esta restricción indica que no debería haber más minas (ya tiene todas las que necesita)
+        if (minasFaltantes === 0) {
+            console.log(`    ⛔ CONTRADICCIÓN: Esta restricción ya tiene todas sus minas`);
+            return true;
+        }
+    }
+    
+    console.log(`  ✅ No se encontraron contradicciones con otras restricciones`);
+    return false;
 };
 
 /**
@@ -1687,7 +1788,7 @@ export const aprenderDeDerrota = (celda) => {
 };
 
 /**
- * Analiza subconjuntos de restricciones para identificar banderas
+ * Analiza subconjuntos de restricciones para identificar banderas, con explicación detallada
  * @param {object} modeloTablero - Modelo del tablero
  * @param {Array} banderasYaIdentificadas - Banderas ya identificadas para no duplicar
  * @returns {Array} - Nuevas banderas descubiertas
@@ -1695,6 +1796,8 @@ export const aprenderDeDerrota = (celda) => {
 const analizarSubconjuntos = (modeloTablero, banderasYaIdentificadas) => {
     const { restricciones, estadoCeldas } = modeloTablero;
     const nuevasBanderas = [];
+    
+    console.log("INICIO: Análisis detallado de subconjuntos para banderas");
     
     // Para cada par de restricciones, buscar si una es subconjunto de otra
     for (let i = 0; i < restricciones.length; i++) {
@@ -1705,44 +1808,76 @@ const analizarSubconjuntos = (modeloTablero, banderasYaIdentificadas) => {
             
             const r2 = restricciones[j];
             
+            console.log(`\nComparando restricciones:`);
+            console.log(`- R1: (${r1.celda.fila + 1},${r1.celda.columna + 1}) valor ${r1.valor}, minas faltantes ${r1.minasFaltantes}`);
+            console.log(`- R2: (${r2.celda.fila + 1},${r2.celda.columna + 1}) valor ${r2.valor}, minas faltantes ${r2.minasFaltantes}`);
+            
             // Verificar si todas las celdas de r1 están contenidas en r2
             const r1EsSubconjuntoDeR2 = esSubconjunto(r1.celdasAfectadas, r2.celdasAfectadas);
             
             if (r1EsSubconjuntoDeR2) {
+                console.log(`✅ R1 ES SUBCONJUNTO DE R2`);
+                
                 // Calcular las celdas que están en r2 pero no en r1
                 const celdasDiferencia = r2.celdasAfectadas.filter(c2 => 
                     !r1.celdasAfectadas.some(c1 => c1.fila === c2.fila && c1.columna === c2.columna)
                 );
                 
+                console.log(`- Celdas en R2 pero no en R1: ${celdasDiferencia.length}`);
+                
                 // Calcular el número de minas en la diferencia
                 const minasDiferencia = r2.minasFaltantes - r1.minasFaltantes;
+                console.log(`- Minas en la diferencia: ${minasDiferencia}`);
                 
                 // Si todas las celdas de la diferencia deben ser minas
                 if (celdasDiferencia.length === minasDiferencia && minasDiferencia > 0) {
-                    // Todas las celdas de la diferencia tienen minas
+                    console.log(`🚩 DEDUCCIÓN: Todas las ${celdasDiferencia.length} celdas de la diferencia son minas`);
+                    
+                    // Verificar contradicciones antes de colocar banderas
+                    let hayContradiccion = false;
                     celdasDiferencia.forEach(c => {
-                        // Verificar que no esté descubierta ni tenga bandera ya
-                        if (!estadoCeldas[c.fila][c.columna].descubierta && 
-                            !estadoCeldas[c.fila][c.columna].tieneBandera &&
-                            !banderasYaIdentificadas.some(b => b.fila === c.fila && b.columna === c.columna) &&
-                            !nuevasBanderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
-                            
-                            nuevasBanderas.push({
-                                fila: c.fila,
-                                columna: c.columna,
-                                origen: 'análisis de subconjuntos',
-                                celdaOrigen1: r1.celda,
-                                celdaOrigen2: r2.celda,
-                                detalle: `La celda (${r1.celda.fila + 1},${r1.celda.columna + 1}) con valor ${r1.valor} es subconjunto de la celda (${r2.celda.fila + 1},${r2.celda.columna + 1}) con valor ${r2.valor}.`
-                            });
-
+                        if (verificarContradiccionConOtrasRestricciones(c, r2, restricciones, estadoCeldas)) {
+                            hayContradiccion = true;
+                            console.log(`⚠️ CONTRADICCIÓN DETECTADA en (${c.fila + 1},${c.columna + 1})`);
                         }
                     });
+                    
+                    if (hayContradiccion) {
+                        console.log(`⛔ Omitiendo banderas por contradicciones`);
+                    } else {
+                        // Todas las celdas de la diferencia tienen minas
+                        celdasDiferencia.forEach(c => {
+                            // Verificar que no esté descubierta ni tenga bandera ya
+                            if (!estadoCeldas[c.fila][c.columna].descubierta && 
+                                !estadoCeldas[c.fila][c.columna].tieneBandera &&
+                                !banderasYaIdentificadas.some(b => b.fila === c.fila && b.columna === c.columna) &&
+                                !nuevasBanderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
+                                
+                                console.log(`✅ Nueva bandera en (${c.fila + 1},${c.columna + 1}) por análisis de subconjuntos`);
+                                nuevasBanderas.push({
+                                    fila: c.fila,
+                                    columna: c.columna,
+                                    origen: 'análisis de subconjuntos',
+                                    celdaOrigen1: r1.celda,
+                                    celdaOrigen2: r2.celda,
+                                    detalle: `La celda (${r1.celda.fila + 1},${r1.celda.columna + 1}) con valor ${r1.valor} es subconjunto de la celda (${r2.celda.fila + 1},${r2.celda.columna + 1}) con valor ${r2.valor}.`
+                                });
+                                
+                                // Actualizar estado para verificaciones posteriores
+                                estadoCeldas[c.fila][c.columna].tieneBandera = true;
+                            }
+                        });
+                    }
+                } else {
+                    console.log(`- No se pueden colocar banderas con esta relación (${celdasDiferencia.length} celdas, ${minasDiferencia} minas requeridas)`);
                 }
+            } else {
+                console.log(`- R1 NO es subconjunto de R2, continuando...`);
             }
         }
     }
     
+    console.log(`\nRESULTADO: ${nuevasBanderas.length} nuevas banderas identificadas por análisis de subconjuntos`);
     return nuevasBanderas;
 };
 
@@ -1819,7 +1954,7 @@ const esSubconjunto = (conjunto1, conjunto2) => {
 };
 
 /**
- * Detecta patrones específicos como 1-2-1 para identificar banderas
+ * Detecta patrones específicos como 1-2-1 para identificar banderas con explicación detallada
  * @param {object} modeloTablero - Modelo del tablero
  * @param {Array} banderasYaIdentificadas - Banderas ya identificadas para no duplicar
  * @returns {Array} - Nuevas banderas identificadas
@@ -1829,14 +1964,19 @@ const detectarPatronesParaBanderas = (modeloTablero, banderasYaIdentificadas) =>
     const { filas, columnas } = tamañoTablero;
     const nuevasBanderas = [];
     
-    // Buscar patrones 1-2-1 (horizontal y vertical)
+    console.log("INICIO: Análisis de patrones para banderas");
+    
+    // 1. Buscar patrones 1-2-1 (horizontal y vertical)
+    console.log("\nBuscando patrón 1-2-1:");
     const direcciones = [
-        { dx: 1, dy: 0 }, // horizontal
-        { dx: 0, dy: 1 }  // vertical
+        { dx: 1, dy: 0, nombre: "horizontal" },
+        { dx: 0, dy: 1, nombre: "vertical" }
     ];
     
     // Buscar patrones en cada dirección
-    direcciones.forEach(({ dx, dy }) => {
+    direcciones.forEach(({ dx, dy, nombre }) => {
+        console.log(`- Buscando patrón 1-2-1 ${nombre}`);
+        
         // Recorrer todo el tablero
         for (let i = 0; i < filas - 2 * dy; i++) {
             for (let j = 0; j < columnas - 2 * dx; j++) {
@@ -1856,6 +1996,8 @@ const detectarPatronesParaBanderas = (modeloTablero, banderasYaIdentificadas) =>
                     
                     // Verificar si es un patrón 1-2-1
                     if (valor1 === '1' && valor2 === '2' && valor3 === '1') {
+                        console.log(`\n🔍 Patrón 1-2-1 ${nombre} detectado en (${pos1.fila + 1},${pos1.columna + 1}) - (${pos2.fila + 1},${pos2.columna + 1}) - (${pos3.fila + 1},${pos3.columna + 1})`);
+                        
                         // Buscar las celdas adyacentes al 2 que no son adyacentes a los 1
                         const adyacentesA2 = obtenerCeldasAdyacentes(pos2.fila, pos2.columna, tamañoTablero);
                         const adyacentesA1 = obtenerCeldasAdyacentes(pos1.fila, pos1.columna, tamañoTablero);
@@ -1867,8 +2009,12 @@ const detectarPatronesParaBanderas = (modeloTablero, banderasYaIdentificadas) =>
                             !adyacentesA3.some(c3 => c3.fila === c2.fila && c3.columna === c3.columna)
                         );
                         
+                        console.log(`- Celdas únicas adyacentes al 2: ${celdasUnicas.length}`);
+                        
                         // Si hay exactamente 2 celdas únicas, son minas
                         if (celdasUnicas.length === 2) {
+                            console.log(`✅ COINCIDENCIA: Las dos celdas únicas son minas`);
+                            
                             celdasUnicas.forEach(c => {
                                 // Verificar que no esté descubierta ni tenga bandera ya
                                 if (!estadoCeldas[c.fila][c.columna].descubierta && 
@@ -1876,6 +2022,7 @@ const detectarPatronesParaBanderas = (modeloTablero, banderasYaIdentificadas) =>
                                     !banderasYaIdentificadas.some(b => b.fila === c.fila && b.columna === c.columna) &&
                                     !nuevasBanderas.some(b => b.fila === c.fila && b.columna === c.columna)) {
                                     
+                                    console.log(`🚩 Nueva bandera en (${c.fila + 1},${c.columna + 1}) por patrón 1-2-1`);
                                     nuevasBanderas.push({
                                         fila: c.fila,
                                         columna: c.columna,
@@ -1884,10 +2031,16 @@ const detectarPatronesParaBanderas = (modeloTablero, banderasYaIdentificadas) =>
                                             celda1: pos1,
                                             celda2: pos2,
                                             celda3: pos3
-                                        }
+                                        },
+                                        detalle: `Patrón 1-2-1 ${nombre} en (${pos1.fila + 1},${pos1.columna + 1}), (${pos2.fila + 1},${pos2.columna + 1}), (${pos3.fila + 1},${pos3.columna + 1})`
                                     });
+                                    
+                                    // Actualizar estado
+                                    estadoCeldas[c.fila][c.columna].tieneBandera = true;
                                 }
                             });
+                        } else {
+                            console.log(`- No coincide exactamente con 2 celdas únicas, omitiendo`);
                         }
                     }
                 }
@@ -1895,6 +2048,64 @@ const detectarPatronesParaBanderas = (modeloTablero, banderasYaIdentificadas) =>
         }
     });
     
+    // 2. Patrón adicional: Esquinas con 1
+    console.log("\nBuscando patrón de esquina con 1:");
+    // Esquinas del tablero
+    const esquinas = [
+        { fila: 0, columna: 0 }, // Superior izquierda
+        { fila: 0, columna: columnas - 1 }, // Superior derecha
+        { fila: filas - 1, columna: 0 }, // Inferior izquierda
+        { fila: filas - 1, columna: columnas - 1 } // Inferior derecha
+    ];
+    
+    esquinas.forEach(esquina => {
+        // Verificar si la esquina está descubierta y tiene valor 1
+        if (estadoCeldas[esquina.fila][esquina.columna].descubierta && 
+            estadoCeldas[esquina.fila][esquina.columna].valor === '1') {
+            
+            console.log(`\n🔍 Patrón de esquina con 1 detectado en (${esquina.fila + 1},${esquina.columna + 1})`);
+            
+            // En una esquina solo hay 3 celdas adyacentes
+            const adyacentes = obtenerCeldasAdyacentes(esquina.fila, esquina.columna, tamañoTablero);
+            
+            // Contar cuántas celdas adyacentes están ya descubiertas
+            const adyacentesDescubiertas = adyacentes.filter(c => 
+                estadoCeldas[c.fila][c.columna].descubierta
+            );
+            
+            // Si ya hay 2 celdas descubiertas y la esquina tiene valor 1, la celda restante es mina
+            if (adyacentesDescubiertas.length === 2) {
+                // La celda restante es mina
+                const celdaRestante = adyacentes.find(c => 
+                    !estadoCeldas[c.fila][c.columna].descubierta
+                );
+                
+                if (celdaRestante && 
+                    !estadoCeldas[celdaRestante.fila][celdaRestante.columna].tieneBandera &&
+                    !banderasYaIdentificadas.some(b => b.fila === celdaRestante.fila && b.columna === celdaRestante.columna) &&
+                    !nuevasBanderas.some(b => b.fila === celdaRestante.fila && b.columna === celdaRestante.columna)) {
+                    
+                    console.log(`🚩 Nueva bandera en (${celdaRestante.fila + 1},${celdaRestante.columna + 1}) por patrón de esquina`);
+                    nuevasBanderas.push({
+                        fila: celdaRestante.fila,
+                        columna: celdaRestante.columna,
+                        origen: 'patrón de esquina',
+                        patron: {
+                            esquina: esquina
+                        },
+                        detalle: `Patrón de esquina con valor 1 en (${esquina.fila + 1},${esquina.columna + 1})`
+                    });
+                    
+                    // Actualizar estado
+                    estadoCeldas[celdaRestante.fila][celdaRestante.columna].tieneBandera = true;
+                }
+            } else {
+                console.log(`- No cumple con los requisitos (${adyacentesDescubiertas.length} celdas descubiertas de 3), omitiendo`);
+            }
+        }
+    });
+    
+    console.log(`\nRESULTADO: ${nuevasBanderas.length} nuevas banderas identificadas por análisis de patrones`);
     return nuevasBanderas;
 };
 

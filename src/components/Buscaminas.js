@@ -274,95 +274,120 @@ const iniciarJuego = () => {
     }
 };
 
-    // Realizar análisis del tablero para encontrar la próxima jugada
-    const realizarAnalisisTablero = () => {
-        try {
-            // Asegurarse de que stateRef tenga valores válidos
-            const validTablero = stateRef.current.tablero || tablero;
-            const validTamañoTablero = stateRef.current.tamañoSeleccionado || tamañoSeleccionado;
-            const validCeldasDescubiertas = stateRef.current.celdasDescubiertas || celdasDescubiertas;
-            const validBanderas = stateRef.current.banderas || banderas;
-            const validHistorialMovimientos = stateRef.current.historialMovimientos || historialMovimientos;
-    
-            // Obtener el último movimiento para contexto
-            let ultimoMovimiento = null;
-            if (validHistorialMovimientos.length > 0) {
-                ultimoMovimiento = validHistorialMovimientos[validHistorialMovimientos.length - 1];
-            }
-    
-            console.log("===== ANÁLISIS DEL TABLERO =====");
-            console.log(`Estado: ${validCeldasDescubiertas.length} celdas descubiertas, ${validBanderas.length} banderas`);
-    
-            // Analizar el tablero para decidir la siguiente jugada
-            const resultadoAnalisis = analizarTablero({
-                tablero: validTablero,
-                tamañoTablero: validTamañoTablero,
-                celdasDescubiertas: validCeldasDescubiertas,
-                banderas: validBanderas,
-                historialMovimientos: validHistorialMovimientos,
-                setMensajeSistema,
-                setAnimacion,
-                memoriaJuego
-            });
-    
-            // Actualizar banderas si se encontraron nuevas
-            if (resultadoAnalisis.banderas && resultadoAnalisis.banderas.length > validBanderas.length) {
-                const nuevasBanderas = resultadoAnalisis.banderas.slice(validBanderas.length);
-                console.log(`ACCIÓN: Colocando ${nuevasBanderas.length} nuevas banderas`);
-                setBanderas(resultadoAnalisis.banderas);
-    
-                // Actualizar historial con las nuevas banderas
-                let nuevoHistorial = [...validHistorialMovimientos];
-                if (resultadoAnalisis.movimientosGenerados && resultadoAnalisis.movimientosGenerados.length > 0) {
-                    resultadoAnalisis.movimientosGenerados.forEach(movimiento => {
-                        if (movimiento.esAccion && movimiento.accion === "bandera") {
-                            nuevoHistorial.push({
-                                ...movimiento,
-                                explicacion: movimiento.explicacion || "Bandera colocada"
-                            });
-                        }
-                    });
-                    setHistorialMovimientos(nuevoHistorial);
-                }
-    
-                // Actualizar estadísticas
-                setEstadisticas(prev => ({
-                    ...prev,
-                    banderasColocadas: resultadoAnalisis.banderas.length
-                }));
-    
-                // Mostrar animación
-                setAnimacion('bandera');
-            }
-    
-            // Si hay una siguiente celda, seleccionarla después de una breve pausa
-            if (resultadoAnalisis.siguienteCelda) {
-                console.log(`DECISIÓN: Seleccionar celda (${resultadoAnalisis.siguienteCelda.fila + 1}, ${resultadoAnalisis.siguienteCelda.columna + 1})`);
-                console.log(`RAZÓN: ${resultadoAnalisis.siguienteCelda.explicacion || resultadoAnalisis.siguienteCelda.tipoAnalisis}`);
-                
-                setTimeout(() => {
-                    try {
-                        if (!stateRef.current.esperandoRespuesta && !stateRef.current.juegoTerminado) {
-                            seleccionarCelda(
-                                resultadoAnalisis.siguienteCelda.fila,
-                                resultadoAnalisis.siguienteCelda.columna
-                            );
-                        }
-                    } catch (error) {
-                        console.error("Error al seleccionar siguiente celda:", error);
-                    }
-                }, 1000);
-            } else {
-                // Si no hay siguientes celdas, verificar victoria
-                console.log(`DECISIÓN: No hay más movimientos seguros disponibles, verificando victoria...`);
-                verificarVictoria();
-            }
-            console.log("===== FIN DEL ANÁLISIS =====");
-        } catch (error) {
-            console.error("Error en análisis del tablero:", error);
-            // No hacer nada más, dejemos que el juego siga su curso normal
+   // Realizar análisis del tablero para encontrar la próxima jugada
+const realizarAnalisisTablero = () => {
+    try {
+        // Asegurarse de que stateRef tenga valores válidos
+        const validTablero = stateRef.current.tablero || tablero;
+        const validTamañoTablero = stateRef.current.tamañoSeleccionado || tamañoSeleccionado;
+        const validCeldasDescubiertas = stateRef.current.celdasDescubiertas || celdasDescubiertas;
+        const validBanderas = stateRef.current.banderas || banderas;
+        const validHistorialMovimientos = stateRef.current.historialMovimientos || historialMovimientos;
+
+        // Obtener el último movimiento para contexto
+        let ultimoMovimiento = null;
+        if (validHistorialMovimientos.length > 0) {
+            ultimoMovimiento = validHistorialMovimientos[validHistorialMovimientos.length - 1];
         }
-    };
+
+        console.log("===== ANÁLISIS DEL TABLERO =====");
+        console.log(`Estado: ${validCeldasDescubiertas.length} celdas descubiertas, ${validBanderas.length} banderas`);
+        
+        // Mostrar estado actual para depuración
+        console.log("Estado actual del tablero:");
+        for (let i = 0; i < validTamañoTablero.filas; i++) {
+            let fila = '';
+            for (let j = 0; j < validTamañoTablero.columnas; j++) {
+                if (validCeldasDescubiertas.some(c => c.fila === i && c.columna === j)) {
+                    fila += `[${validTablero[i][j] || '0'}]`;
+                } else if (validBanderas.some(b => b.fila === i && b.columna === j)) {
+                    fila += '[F]';
+                } else {
+                    fila += '[ ]';
+                }
+            }
+            console.log(fila);
+        }
+
+        // Analizar el tablero para decidir la siguiente jugada
+        const resultadoAnalisis = analizarTablero({
+            tablero: validTablero,
+            tamañoTablero: validTamañoTablero,
+            celdasDescubiertas: validCeldasDescubiertas,
+            banderas: validBanderas,
+            historialMovimientos: validHistorialMovimientos,
+            setMensajeSistema,
+            setAnimacion,
+            memoriaJuego
+        });
+
+        // Actualizar banderas si se encontraron nuevas
+        if (resultadoAnalisis.banderas && resultadoAnalisis.banderas.length > validBanderas.length) {
+            const nuevasBanderas = resultadoAnalisis.banderas.slice(validBanderas.length);
+            console.log(`ACCIÓN: Colocando ${nuevasBanderas.length} nuevas banderas`);
+            
+            // Mostrar ubicaciones detalladas
+            nuevasBanderas.forEach((bandera, idx) => {
+                console.log(`- Bandera ${idx+1}: (${bandera.fila + 1},${bandera.columna + 1}) - ${bandera.origen || 'análisis'}`);
+                if (bandera.detalle) {
+                    console.log(`  Razón: ${bandera.detalle}`);
+                }
+            });
+            
+            setBanderas(resultadoAnalisis.banderas);
+
+            // Actualizar historial con las nuevas banderas
+            let nuevoHistorial = [...validHistorialMovimientos];
+            if (resultadoAnalisis.movimientosGenerados && resultadoAnalisis.movimientosGenerados.length > 0) {
+                resultadoAnalisis.movimientosGenerados.forEach(movimiento => {
+                    if (movimiento.esAccion && movimiento.accion === "bandera") {
+                        nuevoHistorial.push({
+                            ...movimiento,
+                            explicacion: movimiento.explicacion || movimiento.detalle || "Bandera colocada"
+                        });
+                    }
+                });
+                setHistorialMovimientos(nuevoHistorial);
+            }
+
+            // Actualizar estadísticas
+            setEstadisticas(prev => ({
+                ...prev,
+                banderasColocadas: resultadoAnalisis.banderas.length
+            }));
+
+            // Mostrar animación
+            setAnimacion('bandera');
+        }
+
+        // Si hay una siguiente celda, seleccionarla después de una breve pausa
+        if (resultadoAnalisis.siguienteCelda) {
+            console.log(`DECISIÓN: Seleccionar celda (${resultadoAnalisis.siguienteCelda.fila + 1}, ${resultadoAnalisis.siguienteCelda.columna + 1})`);
+            console.log(`RAZÓN: ${resultadoAnalisis.siguienteCelda.explicacion || resultadoAnalisis.siguienteCelda.tipoAnalisis}`);
+            
+            setTimeout(() => {
+                try {
+                    if (!stateRef.current.esperandoRespuesta && !stateRef.current.juegoTerminado) {
+                        seleccionarCelda(
+                            resultadoAnalisis.siguienteCelda.fila,
+                            resultadoAnalisis.siguienteCelda.columna
+                        );
+                    }
+                } catch (error) {
+                    console.error("Error al seleccionar siguiente celda:", error);
+                }
+            }, 1000);
+        } else {
+            // Si no hay siguientes celdas, verificar victoria
+            console.log(`DECISIÓN: No hay más movimientos seguros disponibles, verificando victoria...`);
+            verificarVictoria();
+        }
+        console.log("===== FIN DEL ANÁLISIS =====");
+    } catch (error) {
+        console.error("Error en análisis del tablero:", error);
+        // No hacer nada más, dejemos que el juego siga su curso normal
+    }
+};
 
     // Sistema selecciona una celda
   // Sistema selecciona una celda
@@ -741,7 +766,7 @@ const responderContenidoCelda = (tipo) => {
     console.log(`===== FIN DE APLICAR RESPUESTA CON ADVERTENCIA =====`);
 };
 
-    // Verificar si todas las celdas seguras han sido descubiertas (victoria)
+
    // Verificar si todas las celdas seguras han sido descubiertas (victoria)
    const verificarVictoria = () => {
     const { filas, columnas } = tamañoSeleccionado;
