@@ -406,154 +406,243 @@ export const evaluarCeldaConMemoria = (memoria, fila, columna, tamañoTablero, h
 
         let factorRiesgo = 0;
         let razonamiento = [];
+        let nivel = "bajo";
 
-        // VERIFICACIÓN CRÍTICA: Si esta posición exacta ha tenido una mina antes,
-        // establecer el riesgo al máximo absoluto
-        if (memoria.mapaCalorMinas && memoria.mapaCalorMinas[clave]) {
-            // Esta celda ha tenido una mina antes, establecer riesgo al máximo
-            console.log(`¡ALERTA MÁXIMA! Mina previamente registrada en (${fila},${columna}) - normalizada: ${clave}`);
-            return {
-                factorRiesgo: 1.0, // Máximo riesgo posible
-                razonamiento: [`¡MINA CONOCIDA en (${fila},${columna})!`],
-                confianza: 'extrema' // Nivel máximo de confianza
-            };
-        }
-
-        // Verificar también minas en posiciones concretas (no normalizadas)
-        // Esto es una doble verificación por si el sistema de normalización fallara
+        // VERIFICACIÓN CRÍTICA 1: Posiciones exactas con minas
         if (memoria.minasExactas) {
             const claveExacta = `${fila},${columna}`;
             if (memoria.minasExactas[claveExacta]) {
-                console.log(`¡ALERTA MÁXIMA! Mina previamente registrada exactamente en (${fila},${columna})`);
+                // Verificar cuántas veces se ha encontrado mina en esta posición exacta
+                const ocurrencias = memoria.minasExactas[claveExacta].ocurrencias || 1;
+                
+                // Calcular el factor de riesgo basado en ocurrencias (más ocurrencias = más confianza)
+                // 1.0 es el máximo riesgo posible
+                const riesgoExacto = Math.min(1.0, ocurrencias * 0.4);
+                
+                // Verificar si corresponde al mismo tamaño de tablero (mayor precisión)
+                let mismoTablero = false;
+                if (memoria.minasExactas[claveExacta].ultimoTablero && 
+                    memoria.minasExactas[claveExacta].ultimoTablero.filas === tamañoTablero.filas &&
+                    memoria.minasExactas[claveExacta].ultimoTablero.columnas === tamañoTablero.columnas) {
+                    mismoTablero = true;
+                }
+                
+                // Aumentar si es el mismo tamaño de tablero
+                const factorFinal = mismoTablero ? Math.min(1.0, riesgoExacto * 1.5) : riesgoExacto;
+                
                 return {
-                    factorRiesgo: 1.0,
-                    razonamiento: [`¡MINA CONOCIDA exacta en (${fila},${columna})!`],
-                    confianza: 'extrema'
+                    factorRiesgo: factorFinal,
+                    razonamiento: [`¡MINA CONOCIDA en posición exacta (${fila + 1},${columna + 1})! Detectada ${ocurrencias} veces en el historial.`],
+                    confianza: ocurrencias > 2 || mismoTablero ? 'extrema' : 'alta'
                 };
             }
         }
 
-        // Verificar minas cercanas (aumenta el riesgo de celdas adyacentes a minas conocidas)
+        // VERIFICACIÓN CRÍTICA 2: Posiciones normalizadas con minas
+        if (memoria.mapaCalorMinas && memoria.mapaCalorMinas[clave]) {
+            const ocurrencias = memoria.mapaCalorMinas[clave]; 
+            
+            // Ser más conservador con el riesgo, aumentando progresivamente con más ocurrencias
+            // pero nunca llegando a 1.0 solo por posición normalizada
+            const riesgoNormalizado = Math.min(0.9, ocurrencias * 0.2);
+            
+            razonamiento.push(`Posición normalizada con ${ocurrencias} minas históricas`);
+            factorRiesgo = Math.max(factorRiesgo, riesgoNormalizado);
+            nivel = ocurrencias > 3 ? "alto" : "medio";
+        }
+
+        // VERIFICACIÓN 3: Minas cercanas (aumenta el riesgo de celdas adyacentes a minas conocidas)
+        // Versión mejorada para detectar agrupaciones de minas
         let minasCercanas = 0;
+        let minasAdyacentes = 0;
+        
         if (memoria.mapaCalorMinas) {
-            // Comprobar celdas adyacentes normalizadas
-            for (let i = -0.1; i <= 0.1; i += 0.1) {
-                for (let j = -0.1; j <= 0.1; j += 0.1) {
+            // Revisar posiciones cercanas en un radio de 2 celdas
+            for (let i = -0.2; i <= 0.2; i += 0.1) {
+                for (let j = -0.2; j <= 0.2; j += 0.1) {
                     if (i === 0 && j === 0) continue; // Saltar la celda central
-
-                    const claveAdyacente = `${Math.round((posNorm.filaNorm + i) * 10) / 10},${Math.round((posNorm.columnaNorm + j) * 10) / 10}`;
-
-                    if (memoria.mapaCalorMinas[claveAdyacente]) {
+                    
+                    // Redondear a 1 decimal para normalización
+                    const filaVecina = Math.round((posNorm.filaNorm + i) * 10) / 10;
+                    const columnaVecina = Math.round((posNorm.columnaNorm + j) * 10) / 10;
+                    
+                    // Mantener dentro de rango [0,1]
+                    if (filaVecina < 0 || filaVecina > 1 || columnaVecina < 0 || columnaVecina > 1) continue;
+                    
+                    const claveVecina = `${filaVecina},${columnaVecina}`;
+                    
+                    if (memoria.mapaCalorMinas[claveVecina]) {
                         minasCercanas++;
-                        console.log(`Mina cercana detectada en: ${claveAdyacente}`);
+                        
+                        // Si está directamente adyacente (distancia <= 0.1)
+                        if (Math.abs(i) <= 0.1 && Math.abs(j) <= 0.1) {
+                            minasAdyacentes++;
+                        }
                     }
                 }
             }
-
+            
             // Ajustar factor de riesgo según minas cercanas
             if (minasCercanas > 0) {
-                const riesgoPorProximidad = Math.min(0.7, minasCercanas * 0.2);
+                // Dar más peso a minas adyacentes directas
+                const riesgoPorProximidad = Math.min(0.7, (minasAdyacentes * 0.25) + (minasCercanas * 0.05));
                 factorRiesgo += riesgoPorProximidad;
-                razonamiento.push(`${minasCercanas} minas cercanas detectadas`);
+                
+                razonamiento.push(`${minasAdyacentes} minas adyacentes y ${minasCercanas-minasAdyacentes} minas cercanas detectadas`);
+                nivel = minasAdyacentes > 1 ? "alto" : "medio";
             }
         }
 
-        // Verificar si esta celda ha tenido minas en el pasado (histórico general)
-        if (memoria.mapaCalorMinas) {
-            // Buscar celdas con coordenadas similares (para manejar inexactitudes en normalización)
-            const umbralSimilitud = 0.05;
-            const clavesSimilares = Object.keys(memoria.mapaCalorMinas).filter(k => {
-                try {
-                    const [fNorm, cNorm] = k.split(',').map(parseFloat);
-                    return Math.abs(fNorm - posNorm.filaNorm) <= umbralSimilitud &&
-                        Math.abs(cNorm - posNorm.columnaNorm) <= umbralSimilitud;
-                } catch {
-                    return false;
-                }
-            });
-
-            if (clavesSimilares.length > 0) {
-                const acumuladoFrecuencia = clavesSimilares.reduce((acc, k) => acc + memoria.mapaCalorMinas[k], 0);
-                // Más ocurrencias = más riesgo, con un máximo de 0.8
-                const riesgoPorFrecuencia = Math.min(0.8, acumuladoFrecuencia * 0.25);
-                factorRiesgo += riesgoPorFrecuencia;
-                razonamiento.push(`Histórico de ${acumuladoFrecuencia} minas en ubicaciones similares`);
-            }
-        }
-
-        // Verificar si es un movimiento inicial con historial de derrotas
-        if (historialMovimientos.length === 0 && memoria.patrones && memoria.patrones.movimientosIniciales && memoria.patrones.movimientosIniciales[clave]) {
-            const stats = memoria.patrones.movimientosIniciales[clave];
-            const total = stats.victorias + stats.derrotas;
-            if (total > 0) {
-                const tasaDerrota = stats.derrotas / total;
-                // Mayor impacto de las derrotas históricas
-                factorRiesgo += tasaDerrota * 0.5; // Antes era 0.3
-                razonamiento.push(`Inicio con ${Math.round(tasaDerrota * 100)}% de derrotas (${stats.derrotas} de ${total})`);
-            }
-        }
-
-        // Verificar si sería un segundo movimiento con historial negativo
-        if (historialMovimientos.length === 1 && !historialMovimientos[0].esAccion && memoria.patrones && memoria.patrones.segundosMovimientos) {
-            const movInicial = historialMovimientos[0];
-            const posInicialNorm = normalizarPosicion(movInicial.fila, movInicial.columna, tamañoTablero);
-
-            if (posInicialNorm) {
-                const claveInicial = `${posInicialNorm.filaNorm},${posInicialNorm.columnaNorm}`;
-                const claveSecuencia = `${claveInicial}|${clave}`;
-
-                if (memoria.patrones.segundosMovimientos[claveSecuencia]) {
-                    const stats = memoria.patrones.segundosMovimientos[claveSecuencia];
-                    const total = stats.victorias + stats.derrotas;
-                    if (total > 0) {
-                        const tasaDerrota = stats.derrotas / total;
-                        // Mayor impacto de los patrones negativos
-                        factorRiesgo += tasaDerrota * 0.6; // Antes era 0.4
-                        razonamiento.push(`Secuencia con ${Math.round(tasaDerrota * 100)}% de derrotas (${stats.derrotas} de ${total})`);
-                    }
-                }
-            }
-        }
-
-        // Verificar si esta celda forma parte de una secuencia perdedora
-        if (memoria.patrones && memoria.patrones.secuenciasPerdedoras) {
-            const movimientosAnteriores = historialMovimientos
-                .filter(mov => !mov.esAccion)
+        // VERIFICACIÓN 4: Análisis de movimientos históricos
+        if (historialMovimientos && historialMovimientos.length > 0) {
+            // Verificar la existencia de secuencias similares que llevaron a derrotas
+            // Esto es crítico para evitar repetir errores
+            
+            // Convertir movimientos actuales a formato normalizado
+            const secuenciaActual = historialMovimientos
+                .filter(mov => !mov.esAccion) // Solo movimientos, no banderas
                 .map(mov => {
                     const pos = normalizarPosicion(mov.fila, mov.columna, tamañoTablero);
                     return pos ? `${pos.filaNorm},${pos.columnaNorm}` : null;
                 })
                 .filter(pos => pos !== null);
+            
+            // Verificar si existe una secuencia perdedora similar
+            if (memoria.patrones && memoria.patrones.secuenciasPerdedoras) {
+                // Construir la posible secuencia resultante con esta celda
+                const posibleSecuencia = [...secuenciaActual, clave].join('|');
+                
+                // Buscar coincidencias parciales (no necesita ser exacta)
+                let coincidenciasEncontradas = 0;
+                let coincidenciaExacta = false;
+                
+                memoria.patrones.secuenciasPerdedoras.forEach(secuencia => {
+                    // Si la secuencia histórica contiene exactamente nuestra posible secuencia
+                    if (secuencia.includes(posibleSecuencia)) {
+                        coincidenciasEncontradas += 2; // Doble peso para coincidencias exactas
+                        coincidenciaExacta = true;
+                    }
+                    // Verificar también coincidencias parciales significativas
+                    else if (tienenSuficientesMovimientosComunes(secuencia, posibleSecuencia, 3)) {
+                        coincidenciasEncontradas += 1;
+                    }
+                });
+                
+                if (coincidenciasEncontradas > 0) {
+                    // Peso mayor para coincidencias exactas
+                    const riesgoSecuencia = coincidenciaExacta ? 
+                        Math.min(0.95, 0.6 + (coincidenciasEncontradas * 0.15)) : 
+                        Math.min(0.7, 0.3 + (coincidenciasEncontradas * 0.1));
+                    
+                    factorRiesgo += riesgoSecuencia;
+                    
+                    razonamiento.push(`${coincidenciaExacta ? 'SECUENCIA EXACTA' : 'Secuencia similar'} a ${coincidenciasEncontradas} derrotas históricas`);
+                    nivel = coincidenciaExacta ? "extremo" : "alto";
+                }
+            }
+            
+            // VERIFICACIÓN 5: Patrón de primer movimiento con historial negativo
+            if (historialMovimientos.length === 0) {
+                if (memoria.patrones && memoria.patrones.movimientosIniciales && memoria.patrones.movimientosIniciales[clave]) {
+                    const stats = memoria.patrones.movimientosIniciales[clave];
+                    const total = stats.victorias + stats.derrotas;
+                    
+                    if (total > 0) {
+                        const tasaDerrota = stats.derrotas / total;
+                        
+                        // Mayor impacto para evitar empezar con celdas "malditas"
+                        const riesgoInicio = tasaDerrota * 0.7; // Aumentado de 0.5
+                        factorRiesgo += riesgoInicio;
+                        
+                        razonamiento.push(`Inicio con ${Math.round(tasaDerrota * 100)}% de derrotas (${stats.derrotas} de ${total})`);
+                        nivel = tasaDerrota > 0.5 ? "alto" : "medio";
+                    }
+                }
+            }
+            // VERIFICACIÓN 6: Patrón de segundo movimiento con historial negativo
+            else if (historialMovimientos.length === 1 && !historialMovimientos[0].esAccion) {
+                const movInicial = historialMovimientos[0];
+                const posInicialNorm = normalizarPosicion(movInicial.fila, movInicial.columna, tamañoTablero);
 
-            // Crear la posible secuencia resultante
-            const posibleSecuencia = [...movimientosAnteriores, clave].join('|');
+                if (posInicialNorm && memoria.patrones && memoria.patrones.segundosMovimientos) {
+                    const claveInicial = `${posInicialNorm.filaNorm},${posInicialNorm.columnaNorm}`;
+                    const claveSecuencia = `${claveInicial}|${clave}`;
 
-            // Verificar si esta secuencia o una parte de ella ha resultado en derrota antes
-            const secuenciasPerdedoras = memoria.patrones.secuenciasPerdedoras.filter(seq =>
-                seq.includes(posibleSecuencia) || posibleSecuencia.includes(seq)
-            );
-
-            if (secuenciasPerdedoras.length > 0) {
-                // Aumentar factor de riesgo basado en cuántas secuencias perdedoras coinciden
-                // Mayor impacto de las secuencias perdedoras
-                const riesgoSecuencia = Math.min(0.9, secuenciasPerdedoras.length * 0.3); // Antes era 0.75 y 0.25
-                factorRiesgo += riesgoSecuencia;
-                razonamiento.push(`Secuencia similar a ${secuenciasPerdedoras.length} derrotas previas`);
+                    if (memoria.patrones.segundosMovimientos[claveSecuencia]) {
+                        const stats = memoria.patrones.segundosMovimientos[claveSecuencia];
+                        const total = stats.victorias + stats.derrotas;
+                        
+                        if (total > 0) {
+                            const tasaDerrota = stats.derrotas / total;
+                            
+                            // Mayor impacto para evitar segundos movimientos problemáticos
+                            const riesgoSegundo = Math.min(0.9, tasaDerrota * 0.8); // Aumentado de 0.6
+                            factorRiesgo += riesgoSegundo;
+                            
+                            razonamiento.push(`Secuencia con ${Math.round(tasaDerrota * 100)}% de derrotas (${stats.derrotas} de ${total})`);
+                            nivel = tasaDerrota > 0.7 ? "alto" : "medio";
+                        }
+                    }
+                }
             }
         }
 
         // Limitar el factor de riesgo al rango [0, 1]
         factorRiesgo = Math.max(0, Math.min(1, factorRiesgo));
+        
+        // Asignar nivel de confianza basado en la evidencia acumulada
+        let confianza = 'baja';
+        if (factorRiesgo > 0.7 || nivel === "extremo") {
+            confianza = 'extrema';
+        } else if (factorRiesgo > 0.4 || nivel === "alto") {
+            confianza = 'alta';
+        } else if (factorRiesgo > 0.2 || nivel === "medio") {
+            confianza = 'media';
+        }
+        
+        // Si no hay razonamiento, agregar algo por defecto
+        if (razonamiento.length === 0) {
+            razonamiento.push("Sin datos históricos significativos");
+        }
 
         return {
             factorRiesgo,
-            razonamiento: razonamiento.length > 0 ? razonamiento : ["Sin datos históricos"],
-            confianza: razonamiento.length > 0 ? 'alta' : 'baja'
+            razonamiento,
+            confianza
         };
     } catch (error) {
         console.error("Error en evaluarCeldaConMemoria:", error);
         return { factorRiesgo: 0, razonamiento: ["Error en evaluación de memoria"] };
     }
+};
+
+/**
+ * Verifica si dos secuencias de movimientos comparten suficientes elementos comunes
+ * @param {string} secuencia1 - Primera secuencia de movimientos (formato "pos1|pos2|...")
+ * @param {string} secuencia2 - Segunda secuencia de movimientos
+ * @param {number} minimo - Mínimo de elementos comunes requeridos
+ * @returns {boolean} - true si comparten suficientes elementos
+ */
+const tienenSuficientesMovimientosComunes = (secuencia1, secuencia2, minimo) => {
+    if (!secuencia1 || !secuencia2) return false;
+    
+    const movimientos1 = secuencia1.split('|');
+    const movimientos2 = secuencia2.split('|');
+    
+    // Si alguna secuencia es muy corta, verificar directamente
+    if (movimientos1.length < minimo || movimientos2.length < minimo) {
+        return false;
+    }
+    
+    // Contar elementos comunes
+    let comunes = 0;
+    for (const mov1 of movimientos1) {
+        if (movimientos2.includes(mov1)) {
+            comunes++;
+        }
+    }
+    
+    return comunes >= minimo;
 };
 
 /**
