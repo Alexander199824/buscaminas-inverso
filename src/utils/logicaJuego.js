@@ -144,7 +144,30 @@ export const seleccionarPrimeraCeldaSegura = (tamañoTablero, memoriaJuego = nul
     
     // Obtener minas conocidas del historial (si existe memoria)
     const minasConocidas = [];
-    if (memoriaJuego && memoriaJuego.mapaCalorMinas) {
+    if (memoriaJuego) {
+        // CORRECCIÓN: Primero revisar coordenadas exactas para mayor prioridad
+        if (memoriaJuego.minasExactas) {
+            for (const claveExacta in memoriaJuego.minasExactas) {
+                try {
+                    const [fila, columna] = claveExacta.split(',').map(Number);
+                    
+                    // Solo considerar coordenadas válidas para este tablero
+                    if (fila >= 0 && fila < filas && columna >= 0 && columna < columnas) {
+                        // Añadir con mayor peso para coincidencias exactas
+                        minasConocidas.push({ 
+                            fila, 
+                            columna, 
+                            peso: memoriaJuego.minasExactas[claveExacta].ocurrencias || 1,
+                            exacta: true 
+                        });
+                        console.log(`MEMORIA EXACTA: Mina conocida en (${fila + 1}, ${columna + 1})`);
+                    }
+                } catch (error) {
+                    console.error("Error al procesar mina conocida exacta:", claveExacta, error);
+                }
+            }
+        }
+        
         // Convertir coordenadas normalizadas a coordenadas reales de tablero
         for (const claveNorm in memoriaJuego.mapaCalorMinas) {
             try {
@@ -156,8 +179,16 @@ export const seleccionarPrimeraCeldaSegura = (tamañoTablero, memoriaJuego = nul
                 
                 // Solo considerar coordenadas válidas para este tablero
                 if (fila >= 0 && fila < filas && columna >= 0 && columna < columnas) {
-                    minasConocidas.push({ fila, columna });
-                    console.log(`MEMORIA: Mina conocida en (${fila + 1}, ${columna + 1})`);
+                    // Verificar si ya existe como mina exacta para no duplicar
+                    if (!minasConocidas.some(m => m.fila === fila && m.columna === columna)) {
+                        minasConocidas.push({ 
+                            fila, 
+                            columna, 
+                            peso: memoriaJuego.mapaCalorMinas[claveNorm],
+                            exacta: false
+                        });
+                        console.log(`MEMORIA: Mina conocida en (${fila + 1}, ${columna + 1})`);
+                    }
                 }
             } catch (error) {
                 console.error("Error al procesar mina conocida:", claveNorm, error);
@@ -236,9 +267,11 @@ export const seleccionarPrimeraCeldaSegura = (tamañoTablero, memoriaJuego = nul
                     
                     // Si está muy cerca de una mina conocida, aumentar el riesgo
                     if (distancia <= 2) {
-                        const factorCercania = Math.max(0, 0.5 - (distancia * 0.2));
+                        // CORRECCIÓN: Dar más peso a minas exactas
+                        const factorMina = mina.exacta ? 1.5 : 1.0;
+                        const factorCercania = Math.max(0, 0.5 - (distancia * 0.2)) * factorMina;
                         factorRiesgo += factorCercania;
-                        razonamiento.push(`Cerca de mina conocida (${mina.fila + 1},${mina.columna + 1})`);
+                        razonamiento.push(`Cerca de mina ${mina.exacta ? 'exacta' : ''} conocida (${mina.fila + 1},${mina.columna + 1})`);
                     }
                 }
             }
@@ -287,6 +320,7 @@ export const seleccionarPrimeraCeldaSegura = (tamañoTablero, memoriaJuego = nul
     
     return seleccion;
 };
+
 
 /**
  * Analizar el tablero para tomar decisiones estratégicas (versión mejorada con capas)
@@ -2097,6 +2131,16 @@ const enriquecerMapaProbabilidades = (mapaProbabilidades, memoriaJuego, tamañoT
                 continue;
             }
             
+            // CORRECCIÓN: Verificar primero las coincidencias de minas exactas
+            if (memoriaJuego.minasExactas && memoriaJuego.minasExactas[`${i},${j}`]) {
+                const ocurrencias = memoriaJuego.minasExactas[`${i},${j}`].ocurrencias || 1;
+                // Establecer probabilidad muy alta para coincidencias exactas (casi segura)
+                mapaEnriquecido[clave].probabilidad = Math.min(0.98, 0.7 + (ocurrencias * 0.1));
+                mapaEnriquecido[clave].origen = `¡MINA CONOCIDA! Detectada ${ocurrencias} veces en el historial.`;
+                console.log(`Celda (${i+1},${j+1}): ¡MINA EXACTA CONOCIDA! Probabilidad establecida a ${Math.round(mapaEnriquecido[clave].probabilidad * 100)}%`);
+                continue;
+            }
+            
             // Evaluar la celda con la memoria histórica
             const evaluacion = evaluarCeldaConMemoria(
                 memoriaJuego, i, j, tamañoTablero, historialMovimientos
@@ -2141,7 +2185,6 @@ const enriquecerMapaProbabilidades = (mapaProbabilidades, memoriaJuego, tamañoT
     
     return mapaEnriquecido;
 };
-
 
 /**
  * Seleccionar una celda aleatoria entre las disponibles, evitando repeticiones y usando memoria

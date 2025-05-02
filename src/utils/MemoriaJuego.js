@@ -417,7 +417,8 @@ export const evaluarCeldaConMemoria = (memoria, fila, columna, tamañoTablero, h
                 
                 // Calcular el factor de riesgo basado en ocurrencias (más ocurrencias = más confianza)
                 // 1.0 es el máximo riesgo posible
-                const riesgoExacto = Math.min(1.0, ocurrencias * 0.4);
+                // CORRECCIÓN: Aumentar significativamente el factor para minas exactas
+                const riesgoExacto = Math.min(1.0, ocurrencias * 0.8);
                 
                 // Verificar si corresponde al mismo tamaño de tablero (mayor precisión)
                 let mismoTablero = false;
@@ -428,7 +429,8 @@ export const evaluarCeldaConMemoria = (memoria, fila, columna, tamañoTablero, h
                 }
                 
                 // Aumentar si es el mismo tamaño de tablero
-                const factorFinal = mismoTablero ? Math.min(1.0, riesgoExacto * 1.5) : riesgoExacto;
+                // CORRECCIÓN: Dar mucho más peso cuando es el mismo tamaño de tablero
+                const factorFinal = mismoTablero ? Math.min(1.0, riesgoExacto * 2.0) : riesgoExacto;
                 
                 return {
                     factorRiesgo: factorFinal,

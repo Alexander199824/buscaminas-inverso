@@ -772,15 +772,62 @@ const verificarVictoria = () => {
     const { filas, columnas } = tamañoSeleccionado;
     const totalCeldas = filas * columnas;
 
-    // Asumimos que solo quedan minas por descubrir
+    // Total de celdas marcadas (descubiertas + banderas)
+    const celdasMarcadas = celdasDescubiertas.length + banderas.length;
     const celdasNoDescubiertas = totalCeldas - celdasDescubiertas.length;
-    const banderasColocadas = banderas.length;
 
     console.log(`===== VERIFICANDO CONDICIÓN DE VICTORIA =====`);
-    console.log(`Estado: ${celdasNoDescubiertas} celdas sin descubrir, ${banderasColocadas} banderas colocadas`);
+    console.log(`Estado: ${celdasDescubiertas.length} celdas descubiertas, ${banderas.length} banderas colocadas`);
+    console.log(`Total: ${celdasMarcadas} de ${totalCeldas} celdas marcadas`);
 
-    // Si todas las celdas no descubiertas tienen banderas, es victoria
-    if (celdasNoDescubiertas === banderasColocadas) {
+    // VERIFICACIÓN CLAVE: Si todas las celdas están marcadas (descubiertas + banderas)
+    if (celdasMarcadas === totalCeldas) {
+        try {
+            // Verificar si el sistema encontró alguna mina DURANTE ESTE JUEGO
+            // Solo usa historialMovimientos que contiene únicamente los movimientos de la partida actual
+            const encontroMinaEnJuegoActual = historialMovimientos.some(mov => mov.contenido === 'mina');
+            
+            if (!encontroMinaEnJuegoActual) {
+                console.log(`RESULTADO: ¡VICTORIA COMPLETA DEL SISTEMA! Completó el tablero sin encontrar ninguna mina.`);
+                
+                // Registrar victoria en memoria
+                if (memoriaJuego) {
+                    registrarVictoria(memoriaJuego, historialMovimientos, tamañoSeleccionado);
+                    console.log(`APRENDIZAJE: Registrando patrón de victoria en memoria`);
+                }
+
+                setJuegoTerminado(true);
+                stateRef.current.juegoTerminado = true;
+                
+                // Asegurar que se muestre la animación de victoria
+                setMensajeSistema("¡VICTORIA COMPLETA! El sistema ha terminado el juego sin encontrar ninguna mina.");
+                setAnimacion('victoria');
+                
+                // Forzar el modal con un pequeño retraso para asegurar que se muestre
+                setTimeout(() => {
+                    setMostrarModal(true);
+                    setMensajeModal('¡VICTORIA COMPLETA! El sistema ha terminado el juego sin encontrar ninguna mina. 🎉💣🎊');
+                    setTipoModal('fiesta');
+                }, 100);
+
+                // Actualizar estadísticas
+                setEstadisticas(prev => ({
+                    ...prev,
+                    partidasJugadas: prev.partidasJugadas + 1,
+                    victorias: prev.victorias + 1,
+                    tiempoTotal: prev.tiempoTotal + tiempoJuego
+                }));
+
+                console.log(`===== FIN DEL JUEGO (VICTORIA COMPLETA) =====`);
+                return true;
+            }
+        } catch (error) {
+            console.error("Error al procesar victoria:", error);
+        }
+    }
+
+    // Caso específico: todas las celdas sin minas están descubiertas
+    if (celdasNoDescubiertas === banderas.length && banderas.length > 0) {
         try {
             console.log(`RESULTADO: ¡VICTORIA DEL SISTEMA! Ha descubierto todas las celdas seguras.`);
             
@@ -802,6 +849,7 @@ const verificarVictoria = () => {
             setEstadisticas(prev => ({
                 ...prev,
                 partidasJugadas: prev.partidasJugadas + 1,
+                victorias: prev.victorias + 1,
                 tiempoTotal: prev.tiempoTotal + tiempoJuego
             }));
 
@@ -810,41 +858,8 @@ const verificarVictoria = () => {
         } catch (error) {
             console.error("Error al procesar victoria:", error);
         }
-    } else if (celdasDescubiertas.length === totalCeldas) {
-        // Nueva condición: Si todas las celdas están descubiertas, el sistema ha ganado
-        try {
-            console.log(`RESULTADO: ¡VICTORIA DEL SISTEMA! Ha completado todo el tablero sin encontrar minas.`);
-            
-            // Registrar victoria en memoria
-            if (memoriaJuego) {
-                registrarVictoria(memoriaJuego, historialMovimientos, tamañoSeleccionado);
-                console.log(`APRENDIZAJE: Registrando patrón de victoria en memoria`);
-            }
-
-            setJuegoTerminado(true);
-            stateRef.current.juegoTerminado = true;
-            setMensajeSistema("¡He ganado! El sistema ha completado todo el tablero sin encontrar minas.");
-            setAnimacion('victoria');
-            setMostrarModal(true);
-            setMensajeModal('¡He ganado! El sistema completó todo el tablero sin encontrar minas. 🎉💣🎊');
-            // Nuevo tipo de modal para la victoria con fiesta
-            setTipoModal('fiesta');
-
-            // Actualizar estadísticas
-            setEstadisticas(prev => ({
-                ...prev,
-                partidasJugadas: prev.partidasJugadas + 1,
-                victorias: prev.victorias + 1,
-                tiempoTotal: prev.tiempoTotal + tiempoJuego
-            }));
-
-            console.log(`===== FIN DEL JUEGO (VICTORIA COMPLETA) =====`);
-            return true;
-        } catch (error) {
-            console.error("Error al procesar victoria completa:", error);
-        }
     } else {
-        console.log(`RESULTADO: Continúa el juego, faltan ${celdasNoDescubiertas - banderasColocadas} celdas seguras por descubrir`);
+        console.log(`RESULTADO: Continúa el juego, faltan ${celdasNoDescubiertas - banderas.length} celdas seguras por descubrir`);
     }
 
     console.log(`===== FIN DE VERIFICACIÓN =====`);
