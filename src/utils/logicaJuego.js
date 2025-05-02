@@ -1,6 +1,6 @@
 /**
  * Implementación mejorada de lógica de buscaminas con análisis global, memoria y exploración en capas
- * Esta versión integra un sistema de memoria que permite al sistema aprender de partidas anteriores
+ * 
  */
 
 

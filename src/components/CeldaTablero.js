@@ -101,7 +101,7 @@ const CeldaTablero = ({
                         <span style={{ fontSize: tamañoIcono }}>💣</span>
                     ) : (
                         <div className="relative w-full h-full flex items-center justify-center">
-                            {/* Mostrar el valor excepto si es 0 */}
+                            {/* Mostrar el valor  */}
                             <span style={{ 
                                 color: colorTexto, 
                                 fontSize: tamañoFuente, 
