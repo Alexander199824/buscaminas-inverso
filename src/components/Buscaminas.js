@@ -275,6 +275,7 @@ const iniciarJuego = () => {
 };
 
    // Realizar análisis del tablero para encontrar la próxima jugada
+// Realizar análisis del tablero para encontrar la próxima jugada
 const realizarAnalisisTablero = () => {
     try {
         // Asegurarse de que stateRef tenga valores válidos
@@ -335,6 +336,12 @@ const realizarAnalisisTablero = () => {
             });
             
             setBanderas(resultadoAnalisis.banderas);
+            
+            // Actualizar stateRef inmediatamente con las nuevas banderas
+            stateRef.current = {
+                ...stateRef.current,
+                banderas: resultadoAnalisis.banderas
+            };
 
             // Actualizar historial con las nuevas banderas
             let nuevoHistorial = [...validHistorialMovimientos];
@@ -348,6 +355,12 @@ const realizarAnalisisTablero = () => {
                     }
                 });
                 setHistorialMovimientos(nuevoHistorial);
+                
+                // Actualizar stateRef con el nuevo historial
+                stateRef.current = {
+                    ...stateRef.current,
+                    historialMovimientos: nuevoHistorial
+                };
             }
 
             // Actualizar estadísticas
@@ -358,6 +371,11 @@ const realizarAnalisisTablero = () => {
 
             // Mostrar animación
             setAnimacion('bandera');
+            
+            // Verificar victoria después de colocar banderas
+            setTimeout(() => {
+                verificarVictoria();
+            }, 50);
         }
 
         // Si hay una siguiente celda, seleccionarla después de una breve pausa
@@ -389,9 +407,9 @@ const realizarAnalisisTablero = () => {
     }
 };
 
-    // Sistema selecciona una celda
-  // Sistema selecciona una celda
-  const seleccionarCelda = (fila, columna) => {
+   
+// Sistema selecciona una celda
+const seleccionarCelda = (fila, columna) => {
     try {
         // Verificar si el juego ha terminado
         if (stateRef.current.juegoTerminado) {
@@ -430,6 +448,14 @@ const realizarAnalisisTablero = () => {
         
         setCeldaActual({ fila, columna });
         setEsperandoRespuesta(true);
+        
+        // Actualizar stateRef
+        stateRef.current = {
+            ...stateRef.current,
+            celdaActual: { fila, columna },
+            esperandoRespuesta: true
+        };
+        
         setAnimacion('seleccionar');
 
         // Actualizar estadísticas
@@ -442,6 +468,7 @@ const realizarAnalisisTablero = () => {
         console.error("Error al seleccionar celda:", error);
     }
 };
+
 
 const responderContenidoCelda = (tipo) => {
     try {
@@ -594,6 +621,11 @@ const responderContenidoCelda = (tipo) => {
             stateRef.current.esperandoRespuesta = false;
 
             setAnimacion('respuesta');
+            
+            // Verificar victoria inmediatamente después de actualizar el estado y stateRef
+            setTimeout(() => {
+                verificarVictoria();
+            }, 50);
 
             // Si es un cero, revelar automáticamente todas las celdas adyacentes
             if (tipo === '0' || tipo === 'vacío') {
@@ -649,8 +681,8 @@ const responderContenidoCelda = (tipo) => {
 };
 
 
-   // Aplicar una respuesta a pesar de la inconsistencia
-   const aplicarRespuestaConInconsistencia = () => {
+// Aplicar una respuesta a pesar de la inconsistencia
+const aplicarRespuestaConInconsistencia = () => {
     if (!inconsistenciaDetectada || !celdaActual) return;
 
     console.log(`===== APLICANDO RESPUESTA CON ADVERTENCIA =====`);
@@ -691,25 +723,24 @@ const responderContenidoCelda = (tipo) => {
 
     // Actualizar estado
     setTablero(nuevoTablero);
-    setCeldasDescubiertas([...celdasDescubiertas, { fila, columna }]);
-    setHistorialMovimientos([...historialMovimientos, {
+    
+    const nuevasCeldasDescubiertas = [...celdasDescubiertas, { fila, columna }];
+    setCeldasDescubiertas(nuevasCeldasDescubiertas);
+    
+    const nuevoHistorial = [...historialMovimientos, {
         fila,
         columna,
         contenido: tipo,
         inconsistente: !esAdvertenciaPreventiva // Marcar como inconsistente solo si no es advertencia preventiva
-    }]);
+    }];
+    setHistorialMovimientos(nuevoHistorial);
 
     // Actualizar el stateRef
     stateRef.current = {
         ...stateRef.current,
         tablero: nuevoTablero,
-        celdasDescubiertas: [...celdasDescubiertas, { fila, columna }],
-        historialMovimientos: [...historialMovimientos, {
-            fila,
-            columna,
-            contenido: tipo,
-            inconsistente: !esAdvertenciaPreventiva
-        }]
+        celdasDescubiertas: nuevasCeldasDescubiertas,
+        historialMovimientos: nuevoHistorial
     };
 
     // Limpiar estado de inconsistencia
@@ -722,6 +753,11 @@ const responderContenidoCelda = (tipo) => {
 
     setAnimacion('respuesta');
     
+    // Verificar victoria después de aplicar la respuesta
+    setTimeout(() => {
+        verificarVictoria();
+    }, 50);
+    
     // Si es un cero, revelar automáticamente todas las celdas adyacentes
     if (tipo === '0' || tipo === 'vacío') {
         console.log(`REVELACIÓN AUTOMÁTICA: La celda es ${tipo === '0' ? '0' : 'vacía'}, todas las celdas adyacentes son seguras`);
@@ -731,7 +767,7 @@ const responderContenidoCelda = (tipo) => {
         
         // Filtrar solo las que no están descubiertas ni tienen bandera
         const celdasADescubrir = celdasAdyacentes.filter(c => 
-            !celdasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna) &&
+            !nuevasCeldasDescubiertas.some(d => d.fila === c.fila && d.columna === c.columna) &&
             !banderas.some(b => b.fila === c.fila && b.columna === c.columna)
         );
         
@@ -772,12 +808,16 @@ const verificarVictoria = () => {
     const { filas, columnas } = tamañoSeleccionado;
     const totalCeldas = filas * columnas;
 
+    // Usar stateRef.current para obtener valores actualizados
+    const celdasDescubiertasActuales = stateRef.current.celdasDescubiertas || celdasDescubiertas;
+    const banderasActuales = stateRef.current.banderas || banderas;
+
     // Total de celdas marcadas (descubiertas + banderas)
-    const celdasMarcadas = celdasDescubiertas.length + banderas.length;
-    const celdasNoDescubiertas = totalCeldas - celdasDescubiertas.length;
+    const celdasMarcadas = celdasDescubiertasActuales.length + banderasActuales.length;
+    const celdasNoDescubiertas = totalCeldas - celdasDescubiertasActuales.length;
 
     console.log(`===== VERIFICANDO CONDICIÓN DE VICTORIA =====`);
-    console.log(`Estado: ${celdasDescubiertas.length} celdas descubiertas, ${banderas.length} banderas colocadas`);
+    console.log(`Estado: ${celdasDescubiertasActuales.length} celdas descubiertas, ${banderasActuales.length} banderas colocadas`);
     console.log(`Total: ${celdasMarcadas} de ${totalCeldas} celdas marcadas`);
 
     // VERIFICACIÓN CLAVE: Si todas las celdas están marcadas (descubiertas + banderas)
@@ -827,7 +867,7 @@ const verificarVictoria = () => {
     }
 
     // Caso específico: todas las celdas sin minas están descubiertas
-    if (celdasNoDescubiertas === banderas.length && banderas.length > 0) {
+    if (celdasNoDescubiertas === banderasActuales.length && banderasActuales.length > 0) {
         try {
             console.log(`RESULTADO: ¡VICTORIA DEL SISTEMA! Ha descubierto todas las celdas seguras.`);
             
@@ -859,7 +899,7 @@ const verificarVictoria = () => {
             console.error("Error al procesar victoria:", error);
         }
     } else {
-        console.log(`RESULTADO: Continúa el juego, faltan ${celdasNoDescubiertas - banderas.length} celdas seguras por descubrir`);
+        console.log(`RESULTADO: Continúa el juego, faltan ${celdasNoDescubiertas - banderasActuales.length} celdas seguras por descubrir`);
     }
 
     console.log(`===== FIN DE VERIFICACIÓN =====`);
