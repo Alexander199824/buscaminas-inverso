@@ -1966,6 +1966,7 @@ export const calcularProbabilidadesGlobales = (modeloTablero) => {
     
     return mapaProbabilidades;
 };
+
 /**
  * Reduce probabilidades para celdas aisladas (lejos de números)
  * @param {object} modeloTablero - Modelo del tablero
@@ -2249,8 +2250,6 @@ const seleccionarCeldaAleatoria = (
     return null;
 };
 
-// Añadir esta función en src/utils/logicaJuego.js
-
 /**
  * Determina la mejor jugada utilizando un enfoque basado en capas y seguridad
  * @param {object} modeloTablero - Modelo del tablero
@@ -2347,7 +2346,7 @@ export const determinarMejorJugadaEnCapas = (
     // Si no hay celdas candidatas, seleccionar aleatoriamente
     if (celdasCandidatas.length === 0) {
         console.log(`- No hay celdas candidatas, seleccionando aleatoriamente`);
-        return seleccionarCeldaAleatoria(
+        return seleccionarCeldaAleatoriaSegura(
             modeloTablero.estadoCeldas, 
             tamañoTablero, 
             modeloTablero.celdasDescubiertas, 
@@ -2471,24 +2470,58 @@ export const determinarMejorJugadaEnCapas = (
     
     // CAPA 5: SELECCIÓN CON MÍNIMA PROBABILIDAD
     console.log("CAPA 5: Seleccionando celda con mínima probabilidad");
-    
-    // Ordenar todas las celdas por probabilidad
-    celdasCandidatas.sort((a, b) => a.probabilidad - b.probabilidad);
-    
-    // Seleccionar la de menor probabilidad
-    const celdaMinimaProbabilidad = celdasCandidatas[0];
-    
-    console.log(`DECISIÓN FINAL: Celda de menor probabilidad en (${celdaMinimaProbabilidad.fila + 1},${celdaMinimaProbabilidad.columna + 1}) - ${Math.round(celdaMinimaProbabilidad.probabilidad * 100)}%`);
-    
-    return {
-        fila: celdaMinimaProbabilidad.fila,
-        columna: celdaMinimaProbabilidad.columna,
-        tipoAnalisis: `mínima probabilidad ${Math.round(celdaMinimaProbabilidad.probabilidad * 100)}%`,
-        origen: celdaMinimaProbabilidad.origen,
-        razonamientoMemoria: celdaMinimaProbabilidad.razonamientoMemoria,
-        explicacion: `Esta celda tiene la menor probabilidad (${Math.round(celdaMinimaProbabilidad.probabilidad * 100)}%) de contener una mina entre todas las opciones disponibles`
-    };
+
+    // NUEVA PROTECCIÓN: Filtrar celdas con probabilidad muy alta de ser minas (>85%)
+    const UMBRAL_PELIGRO = 0.85; // 85% o más se considera muy probablemente una mina
+    const celdasBajoUmbral = celdasCandidatas.filter(c => c.probabilidad < UMBRAL_PELIGRO);
+
+    // Si hay celdas con probabilidad menor al umbral, usar esas
+    if (celdasBajoUmbral.length > 0) {
+        console.log(`- Filtrando ${celdasCandidatas.length - celdasBajoUmbral.length} celdas con probabilidad ≥${UMBRAL_PELIGRO * 100}% de ser minas`);
+        
+        // Ordenar por probabilidad (menor primero)
+        celdasBajoUmbral.sort((a, b) => a.probabilidad - b.probabilidad);
+        
+        // Seleccionar la de menor probabilidad
+        const celdaMinimaProbabilidad = celdasBajoUmbral[0];
+        
+        console.log(`DECISIÓN FINAL: Celda de menor probabilidad en (${celdaMinimaProbabilidad.fila + 1},${celdaMinimaProbabilidad.columna + 1}) - ${Math.round(celdaMinimaProbabilidad.probabilidad * 100)}%`);
+        
+        return {
+            fila: celdaMinimaProbabilidad.fila,
+            columna: celdaMinimaProbabilidad.columna,
+            tipoAnalisis: `mínima probabilidad ${Math.round(celdaMinimaProbabilidad.probabilidad * 100)}%`,
+            origen: celdaMinimaProbabilidad.origen,
+            razonamientoMemoria: celdaMinimaProbabilidad.razonamientoMemoria,
+            explicacion: `Esta celda tiene la menor probabilidad (${Math.round(celdaMinimaProbabilidad.probabilidad * 100)}%) de contener una mina entre todas las opciones disponibles`
+        };
+    } else {
+        console.log(`ADVERTENCIA: Todas las celdas tienen probabilidad ≥${UMBRAL_PELIGRO * 100}% de ser minas`);
+        console.log(`- Forzando selección aleatoria entre las probabilidades más bajas disponibles`);
+        
+        // Ordenar todas las celdas por probabilidad
+        celdasCandidatas.sort((a, b) => a.probabilidad - b.probabilidad);
+        
+        // Limitar a las mejores opciones (30% superior)
+        const mejoresOpciones = celdasCandidatas.slice(0, Math.max(1, Math.ceil(celdasCandidatas.length * 0.3)));
+        
+        // Introducir aleatoriedad para evitar repetición
+        const indiceAleatorio = Math.floor(Math.random() * mejoresOpciones.length);
+        const celdaSeleccionada = mejoresOpciones[indiceAleatorio];
+        
+        console.log(`DECISIÓN FINAL (forzada): Celda en (${celdaSeleccionada.fila + 1},${celdaSeleccionada.columna + 1}) - ${Math.round(celdaSeleccionada.probabilidad * 100)}%`);
+        
+        return {
+            fila: celdaSeleccionada.fila,
+            columna: celdaSeleccionada.columna,
+            tipoAnalisis: `selección forzada ${Math.round(celdaSeleccionada.probabilidad * 100)}%`,
+            origen: celdaSeleccionada.origen,
+            razonamientoMemoria: celdaSeleccionada.razonamientoMemoria,
+            explicacion: `A pesar de que todas las celdas tienen alta probabilidad de mina, esta celda fue seleccionada como la mejor opción disponible`
+        };
+    }
 };
+
 
 /**
  * Selecciona la celda más cercana al último movimiento
