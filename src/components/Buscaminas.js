@@ -767,8 +767,8 @@ const responderContenidoCelda = (tipo) => {
 };
 
 
-   // Verificar si todas las celdas seguras han sido descubiertas (victoria)
-   const verificarVictoria = () => {
+// Verificar si todas las celdas seguras han sido descubiertas (victoria)
+const verificarVictoria = () => {
     const { filas, columnas } = tamañoSeleccionado;
     const totalCeldas = filas * columnas;
 
@@ -810,6 +810,39 @@ const responderContenidoCelda = (tipo) => {
         } catch (error) {
             console.error("Error al procesar victoria:", error);
         }
+    } else if (celdasDescubiertas.length === totalCeldas) {
+        // Nueva condición: Si todas las celdas están descubiertas, el sistema ha ganado
+        try {
+            console.log(`RESULTADO: ¡VICTORIA DEL SISTEMA! Ha completado todo el tablero sin encontrar minas.`);
+            
+            // Registrar victoria en memoria
+            if (memoriaJuego) {
+                registrarVictoria(memoriaJuego, historialMovimientos, tamañoSeleccionado);
+                console.log(`APRENDIZAJE: Registrando patrón de victoria en memoria`);
+            }
+
+            setJuegoTerminado(true);
+            stateRef.current.juegoTerminado = true;
+            setMensajeSistema("¡He ganado! El sistema ha completado todo el tablero sin encontrar minas.");
+            setAnimacion('victoria');
+            setMostrarModal(true);
+            setMensajeModal('¡He ganado! El sistema completó todo el tablero sin encontrar minas. 🎉💣🎊');
+            // Nuevo tipo de modal para la victoria con fiesta
+            setTipoModal('fiesta');
+
+            // Actualizar estadísticas
+            setEstadisticas(prev => ({
+                ...prev,
+                partidasJugadas: prev.partidasJugadas + 1,
+                victorias: prev.victorias + 1,
+                tiempoTotal: prev.tiempoTotal + tiempoJuego
+            }));
+
+            console.log(`===== FIN DEL JUEGO (VICTORIA COMPLETA) =====`);
+            return true;
+        } catch (error) {
+            console.error("Error al procesar victoria completa:", error);
+        }
     } else {
         console.log(`RESULTADO: Continúa el juego, faltan ${celdasNoDescubiertas - banderasColocadas} celdas seguras por descubrir`);
     }
@@ -817,6 +850,7 @@ const responderContenidoCelda = (tipo) => {
     console.log(`===== FIN DE VERIFICACIÓN =====`);
     return false;
 };
+
 
     // Cambiar el tema de color
     const cambiarTemaColor = (tema) => {

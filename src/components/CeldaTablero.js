@@ -46,7 +46,7 @@ const CeldaTablero = ({
     if (estaDescubierta && contenido && (contenido !== 'M' && contenido !== '')) {
         const num = contenido === '0' ? 0 : parseInt(contenido);
         switch (num) {
-            case 0: colorTexto = "#a0aec0"; break; // Gris muy suave
+            case 0: colorTexto = "#000000"; break; // negro
             case 1: colorTexto = "#3b82f6"; break; // Azul
             case 2: colorTexto = "#10b981"; break; // Verde
             case 3: colorTexto = "#ef4444"; break; // Rojo
@@ -107,7 +107,7 @@ const CeldaTablero = ({
                                 fontSize: tamañoFuente, 
                                 fontWeight: 'bold' 
                             }}>
-                                {contenido === '' || contenido === '0' ? '' : contenido}
+                                {contenido === '' ? '' : contenido}
                             </span>
                             {esInconsistente && 
                                 <span className="absolute -top-1 -right-1 text-xs">⚠️</span>
