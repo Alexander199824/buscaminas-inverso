@@ -10,86 +10,108 @@ const CeldaTablero = ({
     celdasDescubiertas,
     animacion,
     tema,
+    esInconsistente,
     estaRecienActualizada,
-    esInconsistente
+    onCeldaClick
 }) => {
+    // Estados de la celda
     const esSeleccionada = celdaActual && celdaActual.fila === fila && celdaActual.columna === columna;
     const tieneBandera = banderas.some(b => b.fila === fila && b.columna === columna);
-    const estaDescubierta = celdasDescubiertas.some(c => c.fila === fila && c.columna === c.columna);
+    const estaDescubierta = celdasDescubiertas.some(c => c.fila === fila && c.columna === columna);
     const contenido = tablero[fila][columna];
+    
+    // Ajustar tamaño de texto según tamaño del tablero
+    const esTableroGrande = tamañoSeleccionado.filas > 15;
+    const tamañoFuente = esTableroGrande ? '0.75rem' : '0.85rem';
+    const tamañoIcono = esTableroGrande ? '0.9rem' : '1.1rem';
 
-    // Determinar el tamaño de las celdas según el tamaño del tablero
-    let tamañoCelda = "w-8 h-8 md:w-8 md:h-8";
-    if (tamañoSeleccionado.filas > 10) {
-        tamañoCelda = "w-6 h-6 md:w-6 md:h-6";
-    }
-    else if (tamañoSeleccionado.filas <= 8) {
-        tamañoCelda = "w-10 h-10 md:w-10 md:h-10";
-    }
-
-    // Estilos base para la celda
-    let estilos = `${tamañoCelda} flex items-center justify-center border border-gray-400 font-bold transition-all duration-200 `;
-
-    // Aplicar estilos según el estado de la celda
+    // Determinar estilo base según el estado
+    let colorFondo, colorTexto;
+    
     if (esSeleccionada) {
-        estilos += `${tema.celdaSeleccionada} ${animacion === 'seleccionar' ? 'animate-pulse' : ''} `;
+        colorFondo = '#1e40af'; // Azul oscuro para celda seleccionada
     } else if (tieneBandera) {
-        estilos += `${tema.celdaNormal} ${estaRecienActualizada(fila, columna, 'bandera') ? 'animate-bounce' : ''} `;
+        colorFondo = '#e2e8f0'; // Gris muy claro
     } else if (estaDescubierta) {
         if (contenido === 'M') {
-            estilos += `${tema.celdaMina} ${estaRecienActualizada(fila, columna, 'explosion') ? 'animate-ping' : ''} `;
+            colorFondo = '#fecaca'; // Rojo muy suave
         } else {
-            estilos += `${tema.celdaDescubierta} ${estaRecienActualizada(fila, columna, 'respuesta') ? 'animate-pulse' : ''}`;
-        }
-        
-        // Añadir borde rojo si la celda es inconsistente
-        if (esInconsistente) {
-            estilos += ' border-2 border-red-500 ';
+            colorFondo = '#ffffff'; // Blanco
         }
     } else {
-        estilos += `${tema.celdaNormal} `;
+        colorFondo = '#e2e8f0'; // Gris muy claro
     }
 
     // Determinar el color del número según su valor
-    let colorNumero = "";
     if (estaDescubierta && contenido && (contenido !== 'M' && contenido !== '')) {
-        // Manejar tanto números como el caso especial del '0'
         const num = contenido === '0' ? 0 : parseInt(contenido);
         switch (num) {
-            case 0: colorNumero = "text-gray-400"; break; // Color para cero
-            case 1: colorNumero = "text-blue-600"; break;
-            case 2: colorNumero = "text-green-600"; break;
-            case 3: colorNumero = "text-red-600"; break;
-            case 4: colorNumero = "text-purple-600"; break;
-            case 5: colorNumero = "text-yellow-600"; break;
-            case 6: colorNumero = "text-cyan-600"; break;
-            case 7: colorNumero = "text-black"; break;
-            case 8: colorNumero = "text-gray-500"; break;
-            default: colorNumero = "";
+            case 0: colorTexto = "#a0aec0"; break; // Gris muy suave
+            case 1: colorTexto = "#3b82f6"; break; // Azul
+            case 2: colorTexto = "#10b981"; break; // Verde
+            case 3: colorTexto = "#ef4444"; break; // Rojo
+            case 4: colorTexto = "#8b5cf6"; break; // Púrpura
+            case 5: colorTexto = "#f97316"; break; // Naranja
+            case 6: colorTexto = "#06b6d4"; break; // Turquesa
+            case 7: colorTexto = "#1f2937"; break; // Gris muy oscuro
+            case 8: colorTexto = "#64748b"; break; // Gris medio
+            default: colorTexto = "#64748b";      // Gris predeterminado
+        }
+    }
+
+    // Determinar animaciones
+    let animacionClase = '';
+    if (esSeleccionada && animacion === 'seleccionar') {
+        animacionClase = 'animate-pulse';
+    } else if (tieneBandera && estaRecienActualizada(fila, columna, 'bandera')) {
+        animacionClase = 'animate-bounce';
+    } else if (estaDescubierta) {
+        if (contenido === 'M' && estaRecienActualizada(fila, columna, 'explosion')) {
+            animacionClase = 'animate-ping';
+        } else if (estaRecienActualizada(fila, columna, 'respuesta')) {
+            animacionClase = 'animate-pulse';
         }
     }
 
     return (
         <div
-            className={estilos}
+            className={`w-full h-full flex items-center justify-center ${animacionClase}`}
             data-testid={`celda-${fila}-${columna}`}
             data-selected={esSeleccionada ? "true" : "false"}
             data-discovered={estaDescubierta ? "true" : "false"}
             data-inconsistent={esInconsistente ? "true" : "false"}
+            onClick={() => onCeldaClick && onCeldaClick(fila, columna)}
+            style={{
+                backgroundColor: colorFondo,
+                border: esInconsistente ? '2px solid #ef4444' : 'none',
+                cursor: 'pointer',
+                transition: 'background-color 0.2s',
+                width: '100%',
+                height: '100%',
+                boxSizing: 'border-box',
+                borderRadius: '2px',
+                overflow: 'hidden'
+            }}
         >
             {tieneBandera ? (
-                <span className={`${tema.bandera} text-lg`}>🚩</span>
+                <span style={{ fontSize: tamañoIcono }}>🚩</span>
             ) : (
                 estaDescubierta ? (
                     contenido === 'M' ? (
-                        <span className="text-lg">💣</span>
+                        <span style={{ fontSize: tamañoIcono }}>💣</span>
                     ) : (
-                        <div className="relative">
-                            {/* Mostrar el valor 0 o vacío según corresponda */}
-                            <span className={colorNumero}>
-                                {contenido === '' ? '' : (contenido === '0' ? '0' : contenido)}
+                        <div className="relative w-full h-full flex items-center justify-center">
+                            {/* Mostrar el valor excepto si es 0 */}
+                            <span style={{ 
+                                color: colorTexto, 
+                                fontSize: tamañoFuente, 
+                                fontWeight: 'bold' 
+                            }}>
+                                {contenido === '' || contenido === '0' ? '' : contenido}
                             </span>
-                            {esInconsistente && <span className="absolute -top-1 -right-1 text-xs">⚠️</span>}
+                            {esInconsistente && 
+                                <span className="absolute -top-1 -right-1 text-xs">⚠️</span>
+                            }
                         </div>
                     )
                 ) : ""
